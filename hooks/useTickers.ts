@@ -48,7 +48,7 @@ export const useTickers = () => {
         if (tickers.length === 0) return;
         const universe = [...tickers]
             .filter(t => !BLACKLIST.includes(t.symbol))
-            .slice(0, 50)
+            .slice(0, 100)
             .map(t => t.symbol);
 
         setScanUniverse(universe);

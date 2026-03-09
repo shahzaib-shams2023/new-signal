@@ -369,7 +369,7 @@ export const fetchTickers = async (): Promise<SymbolInfo[]> => {
     const topVolatileEnriched = [...enriched]
       .filter((a) => a.numVolume > 10000000) // Minimum 10M volume
       .sort((a, b) => Math.abs(b.numChange) - Math.abs(a.numChange))
-      .slice(0, 30);
+      .slice(0, 100);
     const volatileSymbols = new Set(topVolatileEnriched.map(e => e.ticker.symbol));
 
     // 3. Identify Majors (Must Include) that aren't already included
