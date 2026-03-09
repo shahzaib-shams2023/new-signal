@@ -1,0 +1,5 @@
+{
+  "name": "Bull Flag pattern 1h - 4h",
+  "description": "A real-time crypto dashboard tracking Top 15 Gainers and Volatility Zones using Binance market data.",
+  "requestFramePermissions": []
+}
