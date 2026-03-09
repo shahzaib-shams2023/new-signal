@@ -250,8 +250,20 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
   if (isNaN(ema5Arr[idx]) || isNaN(ema8Arr[idx]) || isNaN(macdHist[idx]) || isNaN(rsiArr[idx]) || isNaN(atrArr[idx]) || isNaN(adxArr[idx]) || isNaN(vwmaArr[idx])) return null;
   if (isNaN(ema5Arr[prevIdx]) || isNaN(ema8Arr[prevIdx]) || isNaN(macdHist[prevIdx])) return null;
 
-  // BULLISH: EMA-5 crosses above EMA-8 AND MACD Histogram is positive
-  if (ema5Arr[idx] > ema8Arr[idx] && ema5Arr[prevIdx] <= ema8Arr[prevIdx]) {
+  // Check for recent cross in the last 3 candles to avoid missing trades
+  let bullishCrossRecent = false;
+  let bearishCrossRecent = false;
+  for (let i = 0; i <= 3; i++) {
+    const cIdx = idx - i;
+    const pIdx = cIdx - 1;
+    if (pIdx >= 0) {
+      if (ema5Arr[cIdx] > ema8Arr[cIdx] && ema5Arr[pIdx] <= ema8Arr[pIdx]) bullishCrossRecent = true;
+      if (ema5Arr[cIdx] < ema8Arr[cIdx] && ema5Arr[pIdx] >= ema8Arr[pIdx]) bearishCrossRecent = true;
+    }
+  }
+
+  // BULLISH: EMA-5 crossed above EMA-8 recently AND remains above currently
+  if (bullishCrossRecent && ema5Arr[idx] > ema8Arr[idx]) {
     // 1. Long-Term Trend Filter: Only go long if price is above the 50 EMA
     if (!isNaN(ema50Arr[idx]) && closes[idx] < ema50Arr[idx]) return null;
 
@@ -290,8 +302,8 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
     };
   }
 
-  // BEARISH: EMA-5 crosses below EMA-8 AND MACD Histogram is negative
-  if (ema5Arr[idx] < ema8Arr[idx] && ema5Arr[prevIdx] >= ema8Arr[prevIdx]) {
+  // BEARISH: EMA-5 crossed below EMA-8 recently AND remains below currently
+  if (bearishCrossRecent && ema5Arr[idx] < ema8Arr[idx]) {
     // 1. Long-Term Trend Filter: Only go short if price is below the 50 EMA
     if (!isNaN(ema50Arr[idx]) && closes[idx] > ema50Arr[idx]) return null;
 
