@@ -1,14 +1,18 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { StrategyMatch, Candle } from '../types';
-import { fetchKlines, getRateLimitStatus } from '../services/binanceService';
+import { fetchKlinesBatch, getRateLimitStatus } from '../services/binanceService';
 import { checkEMACross } from '../services/indicators';
 
 export const useScanner = (scanUniverse: string[]) => {
+    const [bull1m, setBull1m] = useState<StrategyMatch[]>([]);
+    const [bear1m, setBear1m] = useState<StrategyMatch[]>([]);
     const [bull5m, setBull5m] = useState<StrategyMatch[]>([]);
     const [bear5m, setBear5m] = useState<StrategyMatch[]>([]);
     const [bull15m, setBull15m] = useState<StrategyMatch[]>([]);
     const [bear15m, setBear15m] = useState<StrategyMatch[]>([]);
+    const [bull30m, setBull30m] = useState<StrategyMatch[]>([]);
+    const [bear30m, setBear30m] = useState<StrategyMatch[]>([]);
     const [bull1h, setBull1h] = useState<StrategyMatch[]>([]);
     const [bear1h, setBear1h] = useState<StrategyMatch[]>([]);
     const [bull4h, setBull4h] = useState<StrategyMatch[]>([]);
@@ -83,44 +87,35 @@ export const useScanner = (scanUniverse: string[]) => {
             // Display up to 3 coins to prevent the UI from looking stuck on just 1
             setScanStatus(batch.slice(0, 3).join(', ') + '…');
 
-            await Promise.all(batch.map(async (symbol) => {
-                try {
-                    // 5m Scan
-                    const candles5m = await fetchKlines(symbol, '5m', 120);
-                    const cross5m = checkEMACross(symbol, candles5m, '5m', 0);
+            // Parallelize scanning of multiple timeframes across the whole batch
+            const tfs = ['1m', '5m', '15m', '30m', '1h', '4h'];
+            await Promise.all(tfs.map(async (tf) => {
+                const batchData = await fetchKlinesBatch(batch, tf, 120);
 
-                    updateMatchesStably(setBull5m, cross5m?.signal === 'EMA_CROSS_BULL' ? cross5m : null, symbol, 'EMA_CROSS_BULL');
-                    updateMatchesStably(setBear5m, cross5m?.signal === 'EMA_CROSS_BEAR' ? cross5m : null, symbol, 'EMA_CROSS_BEAR');
+                // Process results for this timeframe
+                batch.forEach(symbol => {
+                    const candles = batchData[symbol] || [];
+                    const cross = checkEMACross(symbol, candles, tf, 0);
 
-                    // 15m Scan
-                    const candles15m = await fetchKlines(symbol, '15m', 120);
-                    const cross15m = checkEMACross(symbol, candles15m, '15m', 0);
+                    // Map setter based on TF
+                    let setterBull: any, setterBear: any;
+                    if (tf === '1m') { setterBull = setBull1m; setterBear = setBear1m; }
+                    else if (tf === '5m') { setterBull = setBull5m; setterBear = setBear5m; }
+                    else if (tf === '15m') { setterBull = setBull15m; setterBear = setBear15m; }
+                    else if (tf === '30m') { setterBull = setBull30m; setterBear = setBear30m; }
+                    else if (tf === '1h') { setterBull = setBull1h; setterBear = setBear1h; }
+                    else if (tf === '4h') { setterBull = setBull4h; setterBear = setBear4h; }
 
-                    updateMatchesStably(setBull15m, cross15m?.signal === 'EMA_CROSS_BULL' ? cross15m : null, symbol, 'EMA_CROSS_BULL');
-                    updateMatchesStably(setBear15m, cross15m?.signal === 'EMA_CROSS_BEAR' ? cross15m : null, symbol, 'EMA_CROSS_BEAR');
-
-                    // 1h Scan
-                    const candles1h = await fetchKlines(symbol, '1h', 120);
-                    const cross1h = checkEMACross(symbol, candles1h, '1h', 0);
-
-                    updateMatchesStably(setBull1h, cross1h?.signal === 'EMA_CROSS_BULL' ? cross1h : null, symbol, 'EMA_CROSS_BULL');
-                    updateMatchesStably(setBear1h, cross1h?.signal === 'EMA_CROSS_BEAR' ? cross1h : null, symbol, 'EMA_CROSS_BEAR');
-
-                    // 4h Scan
-                    const candles4h = await fetchKlines(symbol, '4h', 120);
-                    const cross4h = checkEMACross(symbol, candles4h, '4h', 0);
-
-                    updateMatchesStably(setBull4h, cross4h?.signal === 'EMA_CROSS_BULL' ? cross4h : null, symbol, 'EMA_CROSS_BULL');
-                    updateMatchesStably(setBear4h, cross4h?.signal === 'EMA_CROSS_BEAR' ? cross4h : null, symbol, 'EMA_CROSS_BEAR');
-                } catch (_) { }
+                    updateMatchesStably(setterBull, cross?.signal === 'EMA_CROSS_BULL' ? cross : null, symbol, 'EMA_CROSS_BULL');
+                    updateMatchesStably(setterBear, cross?.signal === 'EMA_CROSS_BEAR' ? cross : null, symbol, 'EMA_CROSS_BEAR');
+                });
             }));
 
             setTotalScanned(prev => prev + batch.length);
             scanIndexRef.current = (idx + batch.length) % currentUniverse.length;
 
-            // Wait at least 1s between batches to prevent the UI from glitching extremely fast,
-            // especially when the cache is hot and responses are instant (0ms).
-            setTimeout(scanNext, 1000);
+            // Yield to UI thread with minimal delay for high-frequency updates
+            setTimeout(scanNext, 50);
         };
 
         scanNext();
@@ -128,7 +123,7 @@ export const useScanner = (scanUniverse: string[]) => {
     }, [scanUniverse.length > 0]);
 
     return {
-        bull5m, bear5m, bull15m, bear15m,
+        bull1m, bear1m, bull5m, bear5m, bull15m, bear15m, bull30m, bear30m,
         bull1h, bear1h, bull4h, bear4h,
         totalScanned, scanStatus, weightInfo
     };

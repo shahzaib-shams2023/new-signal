@@ -253,137 +253,86 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
 
   const idx = bars - 1 - offset;
   const prevIdx = idx - 1;
-  if (prevIdx < 0) return null;
-
   const closes = candles.map(c => c.close);
-  const volumes = candles.map(c => c.volume);
+
+  // Preliminary light indicators
   const ema5Arr = calculateEMA(closes, 5);
   const ema8Arr = calculateEMA(closes, 8);
-  const macdHist = calculateMACDHistogram(closes);
-  const rsiArr = calculateRSI(closes, 14);
-  const atrArr = calculateATR(candles, 14);
-  const vwmaArr = calculateVWMA(candles, 20);
-  const adxResult = calculateADX(candles, 14);
-  const adxArr = adxResult.adx;
-  const bbResult = calculateBollingerBands(closes, 20, 2);
-  const bbUpper = bbResult.upper;
-  const bbLower = bbResult.lower;
-
-  // Calculate Average Volume (20 period)
-  let avgVol = 0;
-  let volCount = 0;
-  for (let i = Math.max(0, idx - 20); i <= idx; i++) {
-    avgVol += volumes[i];
-    volCount++;
-  }
-  avgVol = volCount > 0 ? avgVol / volCount : 0;
-
-  // 50 EMA Baseline Trend Filter
   const ema50Arr = calculateEMA(closes, 50);
 
-  if (isNaN(ema5Arr[idx]) || isNaN(ema8Arr[idx]) || isNaN(macdHist[idx]) || isNaN(rsiArr[idx]) || isNaN(atrArr[idx]) || isNaN(adxArr[idx]) || isNaN(vwmaArr[idx])) return null;
-  if (isNaN(ema5Arr[prevIdx]) || isNaN(ema8Arr[prevIdx]) || isNaN(macdHist[prevIdx])) return null;
+  if (isNaN(ema5Arr[idx]) || isNaN(ema8Arr[idx]) || isNaN(ema5Arr[prevIdx]) || isNaN(ema8Arr[prevIdx])) return null;
 
-  // Check for recent cross in the last 3 candles to avoid missing trades
-  let bullishCrossRecent = false;
-  let bearishCrossRecent = false;
-  for (let i = 0; i <= 3; i++) {
-    const cIdx = idx - i;
-    const pIdx = cIdx - 1;
-    if (pIdx >= 0) {
-      if (ema5Arr[cIdx] > ema8Arr[cIdx] && ema5Arr[pIdx] <= ema8Arr[pIdx]) bullishCrossRecent = true;
-      if (ema5Arr[cIdx] < ema8Arr[cIdx] && ema5Arr[pIdx] >= ema8Arr[pIdx]) bearishCrossRecent = true;
+  const ema5 = ema5Arr[idx];
+  const ema8 = ema8Arr[idx];
+  const pEMA5 = ema5Arr[prevIdx];
+  const pEMA8 = ema8Arr[prevIdx];
+  const currentPrice = closes[idx];
+
+  // 1. Initial EMA Cross & Trend Filter (Very fast)
+  let mode: 'BULL' | 'BEAR' | 'NONE' = 'NONE';
+  if (ema5 > ema8 && pEMA5 <= pEMA8 && currentPrice > ema50Arr[idx]) mode = 'BULL';
+  else if (ema5 < ema8 && pEMA5 >= pEMA8 && currentPrice < ema50Arr[idx]) mode = 'BEAR';
+
+  // Fallback: Check for very recent cross (last 2 candles) if not a direct cross now
+  if (mode === 'NONE') {
+    const p2Idx = prevIdx - 1;
+    if (p2Idx >= 0) {
+      if (ema5 > ema8 && ema5Arr[prevIdx] > ema8Arr[prevIdx] && ema5Arr[p2Idx] <= ema8Arr[p2Idx] && currentPrice > ema50Arr[idx]) mode = 'BULL';
+      else if (ema5 < ema8 && ema5Arr[prevIdx] < ema8Arr[prevIdx] && ema5Arr[p2Idx] >= ema8Arr[p2Idx] && currentPrice < ema50Arr[idx]) mode = 'BEAR';
     }
   }
 
-  // BULLISH: EMA-5 crossed above EMA-8 recently AND remains above currently
-  if (bullishCrossRecent && ema5Arr[idx] > ema8Arr[idx]) {
-    // 1. Long-Term Trend Filter: Only go long if price is above the 50 EMA
-    if (!isNaN(ema50Arr[idx]) && closes[idx] < ema50Arr[idx]) return null;
+  if (mode === 'NONE') return null;
 
-    // 2. Accelerating MACD Momentum: Histogram must be strictly positive AND growing
+  // 2. Momentum & Volatility Confirmation (Lazy calculation starts here)
+  const macdHist = calculateMACDHistogram(closes);
+  if (mode === 'BULL') {
     if (macdHist[idx] <= 0 || macdHist[idx] <= macdHist[prevIdx]) return null;
-
-    // 3. RSI Filter: Avoid overbought conditions + ensure momentum
-    if (rsiArr[idx] < 40 || rsiArr[idx] > 75) return null;
-
-    // 4. Volume Confirmation: Must be elevated (1.2x) but NOT a blow-off top climax (>5x)
-    if (volumes[idx] < avgVol * 1.2 || volumes[idx] > avgVol * 5.0) return null;
-
-    // 5. Price Action / Close Strength: Candle should close in its upper 50%
-    const candle = candles[idx];
-    const range = candle.high - candle.low;
-    if (range > 0 && (candle.close - candle.low) / range < 0.5) return null;
-
-    // 6. ADX Trend Filter: The market MUST be genuinely trending (ADX > 20)
-    // Avoids chop and ensures momentum is actively expanding.
-    if (adxArr[idx] < 20) return null;
-
-    // 7. Institutional VWMA (Volume Weighted MA): Ensure price is above institutional average cost basis
-    if (closes[idx] < vwmaArr[idx]) return null;
-
-    // 8. Bollinger Bands Volatility Expansion: Breakout must be occurring
-    // Price should be crossing the upper band to manifest true breakout momentum.
-    if (closes[idx] < bbUpper[idx]) return null;
-
-    const entryPrice = closes[idx];
-    const atr = atrArr[idx];
-    // Dynamic Stop Loss based on ATR
-    const stopLoss = entryPrice - (atr * 1.5);
-    // Dynamic Take Profit based on Risk/Reward of 1:2.5
-    const takeProfit = entryPrice + (atr * 3.75);
-
-    return {
-      symbol, price: entryPrice, timeframe, type: 'BULLISH', signal: 'EMA_CROSS_BULL',
-      timestamp: candles[idx].time,
-      entryPrice, stopLoss, takeProfit,
-    };
-  }
-
-  // BEARISH: EMA-5 crossed below EMA-8 recently AND remains below currently
-  if (bearishCrossRecent && ema5Arr[idx] < ema8Arr[idx]) {
-    // 1. Long-Term Trend Filter: Only go short if price is below the 50 EMA
-    if (!isNaN(ema50Arr[idx]) && closes[idx] > ema50Arr[idx]) return null;
-
-    // 2. Accelerating MACD Momentum: Histogram must be strictly negative AND increasingly negative
+  } else {
     if (macdHist[idx] >= 0 || macdHist[idx] >= macdHist[prevIdx]) return null;
-
-    // 3. RSI Filter: Avoid oversold conditions + ensure momentum
-    if (rsiArr[idx] > 60 || rsiArr[idx] < 25) return null;
-
-    // 4. Volume Confirmation: Must be elevated (1.2x) but NOT a capitulation bottom (>5x)
-    if (volumes[idx] < avgVol * 1.2 || volumes[idx] > avgVol * 5.0) return null;
-
-    // 5. Price Action / Close Strength: Candle should close in its lower 50%
-    const candle = candles[idx];
-    const range = candle.high - candle.low;
-    if (range > 0 && (candle.high - candle.close) / range < 0.5) return null;
-
-    // 6. ADX Trend Filter: The market MUST be genuinely trending (ADX > 20)
-    // Avoids chop and ensures momentum is actively expanding.
-    if (adxArr[idx] < 20) return null;
-
-    // 7. Institutional VWMA (Volume Weighted MA): Ensure price is below institutional average cost basis
-    if (closes[idx] > vwmaArr[idx]) return null;
-
-    // 8. Bollinger Bands Volatility Expansion: Breakdown must be occurring
-    // Price should be piercing the lower band to manifest true breakdown momentum.
-    if (closes[idx] > bbLower[idx]) return null;
-
-    const entryPrice = closes[idx];
-    const atr = atrArr[idx];
-
-    // Dynamic Stop Loss based on ATR
-    const stopLoss = entryPrice + (atr * 1.5);
-    // Dynamic Take Profit based on Risk/Reward of 1:2.5
-    const takeProfit = entryPrice - (atr * 3.75);
-
-    return {
-      symbol, price: entryPrice, timeframe, type: 'BEARISH', signal: 'EMA_CROSS_BEAR',
-      timestamp: candles[idx].time,
-      entryPrice, stopLoss, takeProfit,
-    };
   }
 
-  return null;
+  const rsiArr = calculateRSI(closes, 14);
+  if (mode === 'BULL') {
+    if (rsiArr[idx] < 40 || rsiArr[idx] > 75) return null;
+  } else {
+    if (rsiArr[idx] > 60 || rsiArr[idx] < 25) return null;
+  }
+
+  // 3. Volume Verification
+  const volumes = candles.map(c => c.volume);
+  let avgVol = 0;
+  for (let i = Math.max(0, idx - 20); i <= idx; i++) avgVol += volumes[i];
+  avgVol /= 21;
+
+  if (volumes[idx] < avgVol * 1.2 || volumes[idx] > avgVol * 5.0) return null;
+
+  // 4. Expensive Institutional Filters (Final Gate)
+  const adxArr = calculateADX(candles, 14).adx;
+  if (isNaN(adxArr[idx]) || adxArr[idx] < 20) return null;
+
+  const vwmaArr = calculateVWMA(candles, 20);
+  if (mode === 'BULL' && currentPrice < vwmaArr[idx]) return null;
+  if (mode === 'BEAR' && currentPrice > vwmaArr[idx]) return null;
+
+  const bb = calculateBollingerBands(closes, 20, 2);
+  if (mode === 'BULL' && currentPrice < bb.upper[idx]) return null;
+  if (mode === 'BEAR' && currentPrice > bb.lower[idx]) return null;
+
+  // 5. Signal Packaging
+  const atrArr = calculateATR(candles, 14);
+  const entryPrice = currentPrice;
+  const atr = atrArr[idx];
+
+  return {
+    symbol,
+    price: entryPrice,
+    timeframe,
+    type: mode === 'BULL' ? 'BULLISH' : 'BEARISH',
+    signal: mode === 'BULL' ? 'EMA_CROSS_BULL' : 'EMA_CROSS_BEAR',
+    timestamp: candles[idx].time,
+    entryPrice,
+    stopLoss: mode === 'BULL' ? entryPrice - (atr * 1.5) : entryPrice + (atr * 1.5),
+    takeProfit: mode === 'BULL' ? entryPrice + (atr * 3.75) : entryPrice - (atr * 3.75),
+  };
 }

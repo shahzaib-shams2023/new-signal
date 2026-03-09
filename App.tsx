@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Header } from './components/Header';
 import { LiveSignalsFeed } from './components/LiveSignalsFeed';
 import { CollapsibleSection } from './components/CollapsibleSection';
+import { TickerRow } from './components/TickerRow';
 import { useTickers } from './hooks/useTickers';
 import { useScanner } from './hooks/useScanner';
 import { StrategyMatch } from './types';
@@ -11,7 +12,7 @@ import { formatPrice } from './utils/formatters';
 const App: React.FC = () => {
   const { tickers, scanUniverse, tickerMap } = useTickers();
   const {
-    bull5m, bear5m, bull15m, bear15m,
+    bull1m, bear1m, bull5m, bear5m, bull15m, bear15m, bull30m, bear30m,
     bull1h, bear1h, bull4h, bear4h,
     totalScanned, scanStatus, weightInfo
   } = useScanner(scanUniverse);
@@ -22,15 +23,26 @@ const App: React.FC = () => {
   // Derived Statistics
   const allSignals = useMemo(() => {
     const cutoff = Date.now() - (48 * 60 * 60 * 1000); // 48h history
-    return [
+    const signals = [
+      ...bull1m, ...bear1m,
       ...bull5m, ...bear5m,
       ...bull15m, ...bear15m,
+      ...bull30m, ...bear30m,
       ...bull1h, ...bear1h,
       ...bull4h, ...bear4h
-    ]
+    ];
+    return signals
       .filter(s => s.timestamp > cutoff)
       .sort((a, b) => b.timestamp - a.timestamp);
-  }, [bull5m, bear5m, bull15m, bear15m, bull1h, bear1h, bull4h, bear4h]);
+  }, [bull1m, bear1m, bull5m, bear5m, bull15m, bear15m, bull30m, bear30m, bull1h, bear1h, bull4h, bear4h]);
+
+  const activeSignalMap = useMemo(() => {
+    const map = new Map<string, StrategyMatch>();
+    allSignals.forEach(s => {
+      if (!map.has(s.symbol)) map.set(s.symbol, s);
+    });
+    return map;
+  }, [allSignals]);
 
   const bullCount = allSignals.filter(s => s.type === 'BULLISH').length;
   const bearCount = allSignals.filter(s => s.type === 'BEARISH').length;
@@ -103,28 +115,14 @@ const App: React.FC = () => {
               Initializing Engine...
             </div>
           ) : stableSidebarAssets.map(ticker => {
-            const change = parseFloat(ticker.priceChangePercent);
-            const hasSignal = allSignals.some(s => s.symbol === ticker.symbol);
-            const isBullSig = allSignals.some(s => s.symbol === ticker.symbol && s.type === 'BULLISH');
-
+            const sig = activeSignalMap.get(ticker.symbol);
             return (
-              <div
+              <TickerRow
                 key={ticker.symbol}
-                className={`group flex justify-between items-center p-3 hover:bg-white/5 rounded-xl transition-all duration-300 border border-transparent ${hasSignal ? (isBullSig ? 'bg-emerald-500/5 border-emerald-500/10' : 'bg-rose-500/5 border-rose-500/10') : ''}`}
-              >
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-2">
-                    <span className="font-black text-sm text-gray-300 group-hover:text-white transition-colors">{ticker.symbol.replace('USDT', '')}</span>
-                    {hasSignal && (
-                      <span className={`w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px] ${isBullSig ? 'bg-emerald-400 shadow-emerald-400/50' : 'bg-rose-400 shadow-rose-400/50'}`} />
-                    )}
-                  </div>
-                  <span className="text-[10px] text-gray-600 font-mono font-medium">${formatPrice(ticker.price)}</span>
-                </div>
-                <div className={`text-[10px] font-black px-2 py-1 rounded-lg border shadow-sm ${change >= 0 ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/10' : 'text-rose-400 bg-rose-500/10 border-rose-500/10'}`}>
-                  {change >= 0 ? '+' : ''}{change.toFixed(2)}%
-                </div>
-              </div>
+                ticker={ticker}
+                hasSignal={!!sig}
+                isBullSig={sig?.type === 'BULLISH'}
+              />
             );
           })}
         </div>
@@ -180,6 +178,11 @@ const App: React.FC = () => {
               <div className="space-y-16">
                 <div className="space-y-12">
                   <div className="space-y-6">
+                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-4">Trend Matrix (1m)</h3>
+                    <CollapsibleSection title="High Conviction Bullish" timeframe="1m" matches={bull1m} tickerMap={tickerMap} color="emerald" />
+                    <CollapsibleSection title="Strategic Exit & Short" timeframe="1m" matches={bear1m} tickerMap={tickerMap} color="rose" />
+                  </div>
+                  <div className="space-y-6">
                     <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-4">Trend Matrix (5m)</h3>
                     <CollapsibleSection title="High Conviction Bullish" timeframe="5m" matches={bull5m} tickerMap={tickerMap} color="emerald" />
                     <CollapsibleSection title="Strategic Exit & Short" timeframe="5m" matches={bear5m} tickerMap={tickerMap} color="rose" />
@@ -188,6 +191,11 @@ const App: React.FC = () => {
                     <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-4">Trend Matrix (15m)</h3>
                     <CollapsibleSection title="High Conviction Bullish" timeframe="15m" matches={bull15m} tickerMap={tickerMap} color="emerald" />
                     <CollapsibleSection title="Strategic Exit & Short" timeframe="15m" matches={bear15m} tickerMap={tickerMap} color="rose" />
+                  </div>
+                  <div className="space-y-6">
+                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-4">Trend Matrix (30m)</h3>
+                    <CollapsibleSection title="High Conviction Bullish" timeframe="30m" matches={bull30m} tickerMap={tickerMap} color="emerald" />
+                    <CollapsibleSection title="Strategic Exit & Short" timeframe="30m" matches={bear30m} tickerMap={tickerMap} color="rose" />
                   </div>
                   <div className="space-y-6">
                     <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-4">Trend Matrix (1h)</h3>

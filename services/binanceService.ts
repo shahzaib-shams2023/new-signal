@@ -154,19 +154,54 @@ async function executeRequest(endpoint: string, weight: number): Promise<any> {
       return await res.json();
 
     } catch (err: any) {
-      if (err.message?.includes('Failed to fetch') || err.name === 'AbortError') {
-        // Network blip or timeout – brief pause then retry
-        const wait = Math.min(2_000 * Math.pow(2, attempt), 30_000);
+      if (err.message?.includes('fetch') || err.name === 'AbortError' || err.message?.includes('NetworkError')) {
+        // Reduced wait for high-frequency trading context
+        const wait = Math.min(1_000 * Math.pow(2, attempt), 10_000);
         console.warn(`🌐 Network error/timeout (${err.message}) – retry in ${wait / 1000} s`);
         await sleep(jitter(wait));
         attempt++;
-        if (attempt > 5) throw err;
+        if (attempt > 3) throw err;
         continue;
       }
       throw err;
     }
   }
 }
+
+/**
+ * High-performance batch candle fetcher.
+ * Uses the internal prioritized queue to handle rate limits and concurrency.
+ */
+export const fetchKlinesBatch = async (
+  symbols: string[],
+  interval: string,
+  limit = 100
+): Promise<Record<string, Candle[]>> => {
+  const results: Record<string, Candle[]> = {};
+  const toFetch: string[] = [];
+
+  for (const s of symbols) {
+    const cached = getCached(`${s}-${interval}`, interval);
+    if (cached) {
+      results[s] = cached.slice(-limit);
+    } else {
+      toFetch.push(s);
+    }
+  }
+
+  if (toFetch.length === 0) return results;
+
+  // Process batch in parallel while respecting our queue's MAX_CONCURRENT (5)
+  await Promise.all(toFetch.map(async (symbol) => {
+    try {
+      results[symbol] = await fetchKlines(symbol, interval, limit);
+    } catch (_) {
+      results[symbol] = [];
+    }
+  }));
+
+  return results;
+};
 
 // ─── Candle LRU Cache ─────────────────────────────────────────────────────────
 // Stores the last fetched candle array per (symbol, interval).
@@ -184,6 +219,7 @@ const CANDLE_TTL: Record<string, number> = {
   '1m': 55_000,        // 55 s  (just under 1 candle period)
   '5m': 4 * 60_000 + 55_000,    // 4 min 55s
   '15m': 14 * 60_000 + 55_000,  // 14 min 55s
+  '30m': 29 * 60_000 + 55_000,  // 29 min 55s
   '1h': 59 * 60_000 + 55_000,   // 59 min 55s
   '4h': 3 * 60 * 60 * 1000 + 59 * 60_000 + 55_000, // 3h 59m 55s
 };

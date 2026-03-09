@@ -53,7 +53,7 @@ export const useTickers = () => {
 
         setScanUniverse(universe);
         if (universe.length > 0) {
-            subscribeKlines(universe, ['5m', '15m', '1h', '4h']);
+            subscribeKlines(universe, ['1m', '5m', '15m', '30m', '1h', '4h']);
         }
     }, [tickers.length]);
 
