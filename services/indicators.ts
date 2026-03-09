@@ -87,6 +87,35 @@ function calculateRSI(closes: number[], period: number = 14): number[] {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Helper: ATR (Average True Range)
+// ─────────────────────────────────────────────────────────────────────────────
+function calculateATR(candles: Candle[], period: number = 14): number[] {
+  const atr: number[] = new Array(candles.length).fill(NaN);
+  if (candles.length <= period) return atr;
+
+  const tr: number[] = new Array(candles.length).fill(0);
+  for (let i = 1; i < candles.length; i++) {
+    const high = candles[i].high;
+    const low = candles[i].low;
+    const prevClose = candles[i - 1].close;
+    tr[i] = Math.max(
+      high - low,
+      Math.abs(high - prevClose),
+      Math.abs(low - prevClose)
+    );
+  }
+
+  let sum = 0;
+  for (let i = 1; i <= period; i++) sum += tr[i];
+  atr[period] = sum / period;
+
+  for (let i = period + 1; i < candles.length; i++) {
+    atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period;
+  }
+  return atr;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 //  EMA 5/8 Crossover Implementation
 // ─────────────────────────────────────────────────────────────────────────────
@@ -99,12 +128,23 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
   if (prevIdx < 0) return null;
 
   const closes = candles.map(c => c.close);
+  const volumes = candles.map(c => c.volume);
   const ema5Arr = calculateEMA(closes, 5);
   const ema8Arr = calculateEMA(closes, 8);
   const macdHist = calculateMACDHistogram(closes);
   const rsiArr = calculateRSI(closes, 14);
+  const atrArr = calculateATR(candles, 14);
 
-  if (isNaN(ema5Arr[idx]) || isNaN(ema8Arr[idx]) || isNaN(macdHist[idx]) || isNaN(rsiArr[idx])) return null;
+  // Calculate Average Volume (20 period)
+  let avgVol = 0;
+  let volCount = 0;
+  for (let i = Math.max(0, idx - 20); i <= idx; i++) {
+    avgVol += volumes[i];
+    volCount++;
+  }
+  avgVol = volCount > 0 ? avgVol / volCount : 0;
+
+  if (isNaN(ema5Arr[idx]) || isNaN(ema8Arr[idx]) || isNaN(macdHist[idx]) || isNaN(rsiArr[idx]) || isNaN(atrArr[idx])) return null;
   if (isNaN(ema5Arr[prevIdx]) || isNaN(ema8Arr[prevIdx])) return null;
 
   // BULLISH: EMA-5 crosses above EMA-8 AND MACD Histogram is positive
@@ -113,14 +153,20 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
     if (macdHist[idx] <= 0) return null;
     // RSI Filter: Avoid overbought conditions + ensure momentum
     if (rsiArr[idx] < 40 || rsiArr[idx] > 75) return null;
+    // Volume Confirmation: Current candle volume must be at least 1.2x the average volume
+    if (volumes[idx] < avgVol * 1.2) return null;
 
     const entryPrice = closes[idx];
-    const range = candles[idx].high - candles[idx].low;
-    const stopLoss = candles[idx].low - (range * 0.15);
+    const atr = atrArr[idx];
+    // Dynamic Stop Loss based on ATR
+    const stopLoss = entryPrice - (atr * 1.5);
+    // Dynamic Take Profit based on Risk/Reward of 1:2.5
+    const takeProfit = entryPrice + (atr * 3.75);
+
     return {
       symbol, price: entryPrice, timeframe, type: 'BULLISH', signal: 'EMA_CROSS_BULL',
       timestamp: candles[idx].time,
-      entryPrice, stopLoss, takeProfit: entryPrice + (entryPrice - stopLoss) * 2.5,
+      entryPrice, stopLoss, takeProfit,
     };
   }
 
@@ -130,14 +176,21 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
     if (macdHist[idx] >= 0) return null;
     // RSI Filter: Avoid oversold conditions + ensure momentum
     if (rsiArr[idx] > 60 || rsiArr[idx] < 25) return null;
+    // Volume Confirmation: Current candle volume must be at least 1.2x the average volume
+    if (volumes[idx] < avgVol * 1.2) return null;
 
     const entryPrice = closes[idx];
-    const range = candles[idx].high - candles[idx].low;
-    const stopLoss = candles[idx].high + (range * 0.15);
+    const atr = atrArr[idx];
+
+    // Dynamic Stop Loss based on ATR
+    const stopLoss = entryPrice + (atr * 1.5);
+    // Dynamic Take Profit based on Risk/Reward of 1:2.5
+    const takeProfit = entryPrice - (atr * 3.75);
+
     return {
       symbol, price: entryPrice, timeframe, type: 'BEARISH', signal: 'EMA_CROSS_BEAR',
       timestamp: candles[idx].time,
-      entryPrice, stopLoss, takeProfit: entryPrice - (stopLoss - entryPrice) * 2.5,
+      entryPrice, stopLoss, takeProfit,
     };
   }
 
