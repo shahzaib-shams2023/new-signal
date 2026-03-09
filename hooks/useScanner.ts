@@ -32,15 +32,20 @@ export const useScanner = (scanUniverse: string[]) => {
         signalId: string
     ) => {
         setter(prev => {
-            const existing = prev.find(m => m.symbol === symbol && m.signal === signalId);
-            if (!existing && !match) return prev;
-            if (!existing && match) return [match, ...prev];
-            if (existing && !match) return prev.filter(m => !(m.symbol === symbol && m.signal === signalId));
-            if (existing && match) {
-                if (existing.timestamp === match.timestamp && existing.price === match.price) return prev;
-                return prev.map(m => (m.symbol === symbol && m.signal === signalId) ? match : m);
+            if (!match) return prev; // Do not remove existing active trades when live entry conditions close out
+
+            const existingIdx = prev.findIndex(m => m.symbol === symbol && m.signal === signalId && m.timestamp === match.timestamp);
+
+            if (existingIdx === -1) {
+                // New signal generated on a new candle
+                return [match, ...prev].slice(0, 100);
+            } else {
+                // Update live price for the current active signal on the current candle
+                if (prev[existingIdx].price === match.price) return prev;
+                const updated = [...prev];
+                updated[existingIdx] = match;
+                return updated;
             }
-            return prev;
         });
     };
 
