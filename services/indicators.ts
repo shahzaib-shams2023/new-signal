@@ -144,17 +144,30 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
   }
   avgVol = volCount > 0 ? avgVol / volCount : 0;
 
+  // 200 EMA Baseline Trend Filter
+  const ema200Arr = calculateEMA(closes, 200);
+
   if (isNaN(ema5Arr[idx]) || isNaN(ema8Arr[idx]) || isNaN(macdHist[idx]) || isNaN(rsiArr[idx]) || isNaN(atrArr[idx])) return null;
-  if (isNaN(ema5Arr[prevIdx]) || isNaN(ema8Arr[prevIdx])) return null;
+  if (isNaN(ema5Arr[prevIdx]) || isNaN(ema8Arr[prevIdx]) || isNaN(macdHist[prevIdx])) return null;
 
   // BULLISH: EMA-5 crosses above EMA-8 AND MACD Histogram is positive
   if (ema5Arr[idx] > ema8Arr[idx] && ema5Arr[prevIdx] <= ema8Arr[prevIdx]) {
-    // Strictly positive MACD Histogram validation
-    if (macdHist[idx] <= 0) return null;
-    // RSI Filter: Avoid overbought conditions + ensure momentum
+    // 1. Long-Term Trend Filter: Only go long if price is above the 200 EMA
+    if (!isNaN(ema200Arr[idx]) && closes[idx] < ema200Arr[idx]) return null;
+
+    // 2. Accelerating MACD Momentum: Histogram must be strictly positive AND growing
+    if (macdHist[idx] <= 0 || macdHist[idx] <= macdHist[prevIdx]) return null;
+
+    // 3. RSI Filter: Avoid overbought conditions + ensure momentum
     if (rsiArr[idx] < 40 || rsiArr[idx] > 75) return null;
-    // Volume Confirmation: Current candle volume must be at least 1.2x the average volume
-    if (volumes[idx] < avgVol * 1.2) return null;
+
+    // 4. Volume Confirmation: Must be elevated (1.2x) but NOT a blow-off top climax (>5x)
+    if (volumes[idx] < avgVol * 1.2 || volumes[idx] > avgVol * 5.0) return null;
+
+    // 5. Price Action / Close Strength: Candle should close in its upper 50%
+    const candle = candles[idx];
+    const range = candle.high - candle.low;
+    if (range > 0 && (candle.close - candle.low) / range < 0.5) return null;
 
     const entryPrice = closes[idx];
     const atr = atrArr[idx];
@@ -172,12 +185,22 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
 
   // BEARISH: EMA-5 crosses below EMA-8 AND MACD Histogram is negative
   if (ema5Arr[idx] < ema8Arr[idx] && ema5Arr[prevIdx] >= ema8Arr[prevIdx]) {
-    // Strictly negative MACD Histogram validation
-    if (macdHist[idx] >= 0) return null;
-    // RSI Filter: Avoid oversold conditions + ensure momentum
+    // 1. Long-Term Trend Filter: Only go short if price is below the 200 EMA
+    if (!isNaN(ema200Arr[idx]) && closes[idx] > ema200Arr[idx]) return null;
+
+    // 2. Accelerating MACD Momentum: Histogram must be strictly negative AND increasingly negative
+    if (macdHist[idx] >= 0 || macdHist[idx] >= macdHist[prevIdx]) return null;
+
+    // 3. RSI Filter: Avoid oversold conditions + ensure momentum
     if (rsiArr[idx] > 60 || rsiArr[idx] < 25) return null;
-    // Volume Confirmation: Current candle volume must be at least 1.2x the average volume
-    if (volumes[idx] < avgVol * 1.2) return null;
+
+    // 4. Volume Confirmation: Must be elevated (1.2x) but NOT a capitulation bottom (>5x)
+    if (volumes[idx] < avgVol * 1.2 || volumes[idx] > avgVol * 5.0) return null;
+
+    // 5. Price Action / Close Strength: Candle should close in its lower 50%
+    const candle = candles[idx];
+    const range = candle.high - candle.low;
+    if (range > 0 && (candle.high - candle.close) / range < 0.5) return null;
 
     const entryPrice = closes[idx];
     const atr = atrArr[idx];
