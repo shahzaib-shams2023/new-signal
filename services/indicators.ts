@@ -116,12 +116,109 @@ function calculateATR(candles: Candle[], period: number = 14): number[] {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Helper: VWMA (Volume Weighted Moving Average)
+// ─────────────────────────────────────────────────────────────────────────────
+function calculateVWMA(candles: Candle[], period: number = 20): number[] {
+  const vwma: number[] = new Array(candles.length).fill(NaN);
+  if (candles.length < period) return vwma;
+
+  for (let i = period - 1; i < candles.length; i++) {
+    let sumPV = 0;
+    let sumV = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      sumPV += candles[j].close * candles[j].volume;
+      sumV += candles[j].volume;
+    }
+    vwma[i] = sumV === 0 ? candles[i].close : sumPV / sumV;
+  }
+  return vwma;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Helper: ADX (Average Directional Index)
+// ─────────────────────────────────────────────────────────────────────────────
+function calculateADX(candles: Candle[], period: number = 14): { adx: number[], plusDI: number[], minusDI: number[] } {
+  const tr: number[] = new Array(candles.length).fill(0);
+  const plusDM: number[] = new Array(candles.length).fill(0);
+  const minusDM: number[] = new Array(candles.length).fill(0);
+
+  for (let i = 1; i < candles.length; i++) {
+    const high = candles[i].high;
+    const low = candles[i].low;
+    const prevHigh = candles[i - 1].high;
+    const prevLow = candles[i - 1].low;
+    const prevClose = candles[i - 1].close;
+
+    tr[i] = Math.max(
+      high - low,
+      Math.abs(high - prevClose),
+      Math.abs(low - prevClose)
+    );
+
+    const upMove = high - prevHigh;
+    const downMove = prevLow - low;
+
+    if (upMove > downMove && upMove > 0) plusDM[i] = upMove;
+    if (downMove > upMove && downMove > 0) minusDM[i] = downMove;
+  }
+
+  const smooth = (data: number[], p: number) => {
+    const res: number[] = new Array(data.length).fill(NaN);
+    let sum = 0;
+    for (let i = 1; i <= p; i++) sum += data[i];
+    res[p] = sum;
+    for (let i = p + 1; i < data.length; i++) {
+      res[i] = res[i - 1] - (res[i - 1] / p) + data[i];
+    }
+    return res;
+  };
+
+  const smoothedTR = smooth(tr, period);
+  const smoothedPlusDM = smooth(plusDM, period);
+  const smoothedMinusDM = smooth(minusDM, period);
+
+  const plusDI: number[] = new Array(candles.length).fill(NaN);
+  const minusDI: number[] = new Array(candles.length).fill(NaN);
+  const dx: number[] = new Array(candles.length).fill(NaN);
+
+  for (let i = period; i < candles.length; i++) {
+    if (smoothedTR[i] === 0) {
+      plusDI[i] = 0;
+      minusDI[i] = 0;
+      dx[i] = 0;
+    } else {
+      plusDI[i] = (smoothedPlusDM[i] / smoothedTR[i]) * 100;
+      minusDI[i] = (smoothedMinusDM[i] / smoothedTR[i]) * 100;
+      const diDiff = Math.abs(plusDI[i] - minusDI[i]);
+      const diSum = plusDI[i] + minusDI[i];
+      dx[i] = diSum === 0 ? 0 : (diDiff / diSum) * 100;
+    }
+  }
+
+  const adx: number[] = new Array(candles.length).fill(NaN);
+  let dxSum = 0;
+  let count = 0;
+  for (let i = period; i < period * 2; i++) {
+    if (!isNaN(dx[i])) { dxSum += dx[i]; count++; }
+  }
+
+  if (count > 0) {
+    adx[period * 2 - 1] = dxSum / count;
+    for (let i = period * 2; i < candles.length; i++) {
+      adx[i] = (adx[i - 1] * (period - 1) + dx[i]) / period;
+    }
+  }
+
+  return { adx, plusDI, minusDI };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 //  EMA 5/8 Crossover Implementation
 // ─────────────────────────────────────────────────────────────────────────────
 export function checkEMACross(symbol: string, candles: Candle[], timeframe: string, offset = 0): StrategyMatch | null {
   const bars = candles.length;
-  if (bars < 35) return null;
+  if (bars < 50) return null;
 
   const idx = bars - 1 - offset;
   const prevIdx = idx - 1;
@@ -134,6 +231,9 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
   const macdHist = calculateMACDHistogram(closes);
   const rsiArr = calculateRSI(closes, 14);
   const atrArr = calculateATR(candles, 14);
+  const vwmaArr = calculateVWMA(candles, 20);
+  const adxResult = calculateADX(candles, 14);
+  const adxArr = adxResult.adx;
 
   // Calculate Average Volume (20 period)
   let avgVol = 0;
@@ -144,16 +244,16 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
   }
   avgVol = volCount > 0 ? avgVol / volCount : 0;
 
-  // 200 EMA Baseline Trend Filter
-  const ema200Arr = calculateEMA(closes, 200);
+  // 50 EMA Baseline Trend Filter
+  const ema50Arr = calculateEMA(closes, 50);
 
-  if (isNaN(ema5Arr[idx]) || isNaN(ema8Arr[idx]) || isNaN(macdHist[idx]) || isNaN(rsiArr[idx]) || isNaN(atrArr[idx])) return null;
+  if (isNaN(ema5Arr[idx]) || isNaN(ema8Arr[idx]) || isNaN(macdHist[idx]) || isNaN(rsiArr[idx]) || isNaN(atrArr[idx]) || isNaN(adxArr[idx]) || isNaN(vwmaArr[idx])) return null;
   if (isNaN(ema5Arr[prevIdx]) || isNaN(ema8Arr[prevIdx]) || isNaN(macdHist[prevIdx])) return null;
 
   // BULLISH: EMA-5 crosses above EMA-8 AND MACD Histogram is positive
   if (ema5Arr[idx] > ema8Arr[idx] && ema5Arr[prevIdx] <= ema8Arr[prevIdx]) {
-    // 1. Long-Term Trend Filter: Only go long if price is above the 200 EMA
-    if (!isNaN(ema200Arr[idx]) && closes[idx] < ema200Arr[idx]) return null;
+    // 1. Long-Term Trend Filter: Only go long if price is above the 50 EMA
+    if (!isNaN(ema50Arr[idx]) && closes[idx] < ema50Arr[idx]) return null;
 
     // 2. Accelerating MACD Momentum: Histogram must be strictly positive AND growing
     if (macdHist[idx] <= 0 || macdHist[idx] <= macdHist[prevIdx]) return null;
@@ -168,6 +268,13 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
     const candle = candles[idx];
     const range = candle.high - candle.low;
     if (range > 0 && (candle.close - candle.low) / range < 0.5) return null;
+
+    // 6. ADX Trend Filter: The market MUST be genuinely trending (ADX > 20)
+    // Avoids chop and ensures momentum is actively expanding.
+    if (adxArr[idx] < 20) return null;
+
+    // 7. Institutional VWMA (Volume Weighted MA): Ensure price is above institutional average cost basis
+    if (closes[idx] < vwmaArr[idx]) return null;
 
     const entryPrice = closes[idx];
     const atr = atrArr[idx];
@@ -185,8 +292,8 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
 
   // BEARISH: EMA-5 crosses below EMA-8 AND MACD Histogram is negative
   if (ema5Arr[idx] < ema8Arr[idx] && ema5Arr[prevIdx] >= ema8Arr[prevIdx]) {
-    // 1. Long-Term Trend Filter: Only go short if price is below the 200 EMA
-    if (!isNaN(ema200Arr[idx]) && closes[idx] > ema200Arr[idx]) return null;
+    // 1. Long-Term Trend Filter: Only go short if price is below the 50 EMA
+    if (!isNaN(ema50Arr[idx]) && closes[idx] > ema50Arr[idx]) return null;
 
     // 2. Accelerating MACD Momentum: Histogram must be strictly negative AND increasingly negative
     if (macdHist[idx] >= 0 || macdHist[idx] >= macdHist[prevIdx]) return null;
@@ -201,6 +308,13 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
     const candle = candles[idx];
     const range = candle.high - candle.low;
     if (range > 0 && (candle.high - candle.close) / range < 0.5) return null;
+
+    // 6. ADX Trend Filter: The market MUST be genuinely trending (ADX > 20)
+    // Avoids chop and ensures momentum is actively expanding.
+    if (adxArr[idx] < 20) return null;
+
+    // 7. Institutional VWMA (Volume Weighted MA): Ensure price is below institutional average cost basis
+    if (closes[idx] > vwmaArr[idx]) return null;
 
     const entryPrice = closes[idx];
     const atr = atrArr[idx];
