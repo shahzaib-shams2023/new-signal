@@ -213,6 +213,37 @@ function calculateADX(candles: Candle[], period: number = 14): { adx: number[], 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Helper: Bollinger Bands
+// ─────────────────────────────────────────────────────────────────────────────
+function calculateBollingerBands(closes: number[], period: number = 20, multiplier: number = 2): { upper: number[], lower: number[], basis: number[] } {
+  const basis: number[] = new Array(closes.length).fill(NaN);
+  const upper: number[] = new Array(closes.length).fill(NaN);
+  const lower: number[] = new Array(closes.length).fill(NaN);
+
+  if (closes.length < period) return { upper, lower, basis };
+
+  for (let i = period - 1; i < closes.length; i++) {
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      sum += closes[j];
+    }
+    const mean = sum / period;
+    basis[i] = mean;
+
+    let varianceSum = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      varianceSum += Math.pow(closes[j] - mean, 2);
+    }
+    const stdDev = Math.sqrt(varianceSum / period);
+
+    upper[i] = mean + multiplier * stdDev;
+    lower[i] = mean - multiplier * stdDev;
+  }
+
+  return { upper, lower, basis };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 //  EMA 5/8 Crossover Implementation
 // ─────────────────────────────────────────────────────────────────────────────
@@ -234,6 +265,9 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
   const vwmaArr = calculateVWMA(candles, 20);
   const adxResult = calculateADX(candles, 14);
   const adxArr = adxResult.adx;
+  const bbResult = calculateBollingerBands(closes, 20, 2);
+  const bbUpper = bbResult.upper;
+  const bbLower = bbResult.lower;
 
   // Calculate Average Volume (20 period)
   let avgVol = 0;
@@ -288,6 +322,10 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
     // 7. Institutional VWMA (Volume Weighted MA): Ensure price is above institutional average cost basis
     if (closes[idx] < vwmaArr[idx]) return null;
 
+    // 8. Bollinger Bands Volatility Expansion: Breakout must be occurring
+    // Price should be crossing the upper band to manifest true breakout momentum.
+    if (closes[idx] < bbUpper[idx]) return null;
+
     const entryPrice = closes[idx];
     const atr = atrArr[idx];
     // Dynamic Stop Loss based on ATR
@@ -327,6 +365,10 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
 
     // 7. Institutional VWMA (Volume Weighted MA): Ensure price is below institutional average cost basis
     if (closes[idx] > vwmaArr[idx]) return null;
+
+    // 8. Bollinger Bands Volatility Expansion: Breakdown must be occurring
+    // Price should be piercing the lower band to manifest true breakdown momentum.
+    if (closes[idx] > bbLower[idx]) return null;
 
     const entryPrice = closes[idx];
     const atr = atrArr[idx];
