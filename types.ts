@@ -25,7 +25,9 @@ export interface StrategyMatch {
   type: 'BULLISH' | 'BEARISH';
   signal:
   | 'EMA_CROSS_BULL'
-  | 'EMA_CROSS_BEAR';
+  | 'EMA_CROSS_BEAR'
+  | 'MOMENTUM_BULL'
+  | 'MOMENTUM_BEAR';
   timestamp: number;
   entryPrice?: number;
   stopLoss?: number;

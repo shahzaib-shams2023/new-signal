@@ -249,90 +249,131 @@ function calculateBollingerBands(closes: number[], period: number = 20, multipli
 // ─────────────────────────────────────────────────────────────────────────────
 export function checkEMACross(symbol: string, candles: Candle[], timeframe: string, offset = 0): StrategyMatch | null {
   const bars = candles.length;
-  if (bars < 50) return null;
+  if (bars < 20) return null;
 
-  const idx = bars - 1 - offset;
-  const prevIdx = idx - 1;
-  const closes = candles.map(c => c.close);
+  // 1. Logic Selection: Bullish or Bearish Impulse Momentum
+  // - Bullish Impulse: 2-3 green candles
+  // - Pullback: 1-2 candles (Red or Small Body)
+  // - Confirmation: Green, closes above all pullback highs
+  // - Requirement: Confirmation candle must be CLOSED (not live).
 
-  // Preliminary light indicators
-  const ema5Arr = calculateEMA(closes, 5);
-  const ema8Arr = calculateEMA(closes, 8);
-  const ema50Arr = calculateEMA(closes, 50);
+  const isBullish = (c: Candle) => c.close > c.open;
+  const isBearish = (c: Candle) => c.close < c.open;
+  const isSmallBody = (c: Candle) => {
+    const body = Math.abs(c.close - c.open);
+    const range = c.high - c.low;
+    return range === 0 ? true : body <= range * 0.35; // Body is < 35% of total range
+  };
 
-  if (isNaN(ema5Arr[idx]) || isNaN(ema8Arr[idx]) || isNaN(ema5Arr[prevIdx]) || isNaN(ema8Arr[prevIdx])) return null;
-
-  const ema5 = ema5Arr[idx];
-  const ema8 = ema8Arr[idx];
-  const pEMA5 = ema5Arr[prevIdx];
-  const pEMA8 = ema8Arr[prevIdx];
-  const currentPrice = closes[idx];
-
-  // 1. Initial EMA Cross & Trend Filter (Very fast)
   let mode: 'BULL' | 'BEAR' | 'NONE' = 'NONE';
-  if (ema5 > ema8 && pEMA5 <= pEMA8 && currentPrice > ema50Arr[idx]) mode = 'BULL';
-  else if (ema5 < ema8 && pEMA5 >= pEMA8 && currentPrice < ema50Arr[idx]) mode = 'BEAR';
 
-  // Fallback: Check for very recent cross (last 2 candles) if not a direct cross now
-  if (mode === 'NONE') {
-    const p2Idx = prevIdx - 1;
-    if (p2Idx >= 0) {
-      if (ema5 > ema8 && ema5Arr[prevIdx] > ema8Arr[prevIdx] && ema5Arr[p2Idx] <= ema8Arr[p2Idx] && currentPrice > ema50Arr[idx]) mode = 'BULL';
-      else if (ema5 < ema8 && ema5Arr[prevIdx] < ema8Arr[prevIdx] && ema5Arr[p2Idx] >= ema8Arr[p2Idx] && currentPrice < ema50Arr[idx]) mode = 'BEAR';
+  // We identify the confirmation candle at idx = bars - 2 (the most recently closed candle)
+  // This ensures the candle is not "live".
+  const finalIdx = bars - 2;
+  if (finalIdx < 10) return null;
+
+  const closes = candles.map(c => c.close);
+  const currentPrice = candles[bars - 1].close; // Still use latest price for entry
+
+  const checkBullish = (endIdx: number): boolean => {
+    const conf = candles[endIdx];
+    if (!isBullish(conf)) return false;
+
+    for (let pbLen = 1; pbLen <= 2; pbLen++) {
+      const pbStart = endIdx - pbLen;
+      const pbCandles = candles.slice(pbStart, endIdx);
+      if (pbCandles.every(c => isBearish(c) || isSmallBody(c))) {
+        const pbHigh = Math.max(...pbCandles.map(c => c.high));
+        if (conf.close > pbHigh) {
+          for (let impLen = 2; impLen <= 3; impLen++) {
+            const impStart = pbStart - impLen;
+            if (impStart >= 0) {
+              const impCandles = candles.slice(impStart, pbStart);
+              if (impCandles.every(c => isBullish(c))) return true;
+            }
+          }
+        }
+      }
     }
-  }
+    return false;
+  };
+
+  const checkBearish = (endIdx: number): boolean => {
+    const conf = candles[endIdx];
+    if (!isBearish(conf)) return false;
+
+    for (let pbLen = 1; pbLen <= 2; pbLen++) {
+      const pbStart = endIdx - pbLen;
+      const pbCandles = candles.slice(pbStart, endIdx);
+      if (pbCandles.every(c => isBullish(c) || isSmallBody(c))) {
+        const pbLow = Math.min(...pbCandles.map(c => c.low));
+        if (conf.close < pbLow) {
+          for (let impLen = 2; impLen <= 3; impLen++) {
+            const impStart = pbStart - impLen;
+            if (impStart >= 0) {
+              const impCandles = candles.slice(impStart, pbStart);
+              if (impCandles.every(c => isBearish(c))) return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  };
+
+  if (checkBullish(finalIdx)) mode = 'BULL';
+  else if (checkBearish(finalIdx)) mode = 'BEAR';
 
   if (mode === 'NONE') return null;
 
-  // 2. Momentum & Volatility Confirmation (Lazy calculation starts here)
+  // 2. Momentum & Volatility Confirmation using 'finalIdx' (The closed confirmation bar)
+  const finalPrevIdx = finalIdx - 1;
   const macdHist = calculateMACDHistogram(closes);
   if (mode === 'BULL') {
-    if (macdHist[idx] <= 0 || macdHist[idx] <= macdHist[prevIdx]) return null;
+    if (macdHist[finalIdx] <= 0 || macdHist[finalIdx] <= macdHist[finalPrevIdx]) return null;
   } else {
-    if (macdHist[idx] >= 0 || macdHist[idx] >= macdHist[prevIdx]) return null;
+    if (macdHist[finalIdx] >= 0 || macdHist[finalIdx] >= macdHist[finalPrevIdx]) return null;
   }
 
   const rsiArr = calculateRSI(closes, 14);
   if (mode === 'BULL') {
-    if (rsiArr[idx] < 40 || rsiArr[idx] > 75) return null;
+    if (rsiArr[finalIdx] < 40 || rsiArr[finalIdx] > 80) return null;
   } else {
-    if (rsiArr[idx] > 60 || rsiArr[idx] < 25) return null;
+    if (rsiArr[finalIdx] > 60 || rsiArr[finalIdx] < 20) return null;
   }
 
   // 3. Volume Verification
   const volumes = candles.map(c => c.volume);
   let avgVol = 0;
-  for (let i = Math.max(0, idx - 20); i <= idx; i++) avgVol += volumes[i];
+  for (let i = Math.max(0, finalIdx - 20); i <= finalIdx; i++) avgVol += volumes[i];
   avgVol /= 21;
 
-  if (volumes[idx] < avgVol * 1.2 || volumes[idx] > avgVol * 5.0) return null;
+  if (volumes[finalIdx] < avgVol * 1.1) return null; // Relaxed slightly from 1.2 to 1.1
 
-  // 4. Expensive Institutional Filters (Final Gate)
+  // 4. Trend & Institutional Filters
   const adxArr = calculateADX(candles, 14).adx;
-  if (isNaN(adxArr[idx]) || adxArr[idx] < 20) return null;
+  if (!isNaN(adxArr[finalIdx]) && adxArr[finalIdx] < 18) return null;
 
   const vwmaArr = calculateVWMA(candles, 20);
-  if (mode === 'BULL' && currentPrice < vwmaArr[idx]) return null;
-  if (mode === 'BEAR' && currentPrice > vwmaArr[idx]) return null;
+  if (mode === 'BULL' && candles[finalIdx].close < vwmaArr[finalIdx]) return null;
+  if (mode === 'BEAR' && candles[finalIdx].close > vwmaArr[finalIdx]) return null;
 
   const bb = calculateBollingerBands(closes, 20, 2);
-  if (mode === 'BULL' && currentPrice < bb.upper[idx]) return null;
-  if (mode === 'BEAR' && currentPrice > bb.lower[idx]) return null;
+  if (mode === 'BULL' && candles[finalIdx].close < bb.upper[finalIdx]) return null;
+  if (mode === 'BEAR' && candles[finalIdx].close > bb.lower[finalIdx]) return null;
 
-  // 5. Signal Packaging
   const atrArr = calculateATR(candles, 14);
-  const entryPrice = currentPrice;
-  const atr = atrArr[idx];
+  const atr = atrArr[finalIdx];
 
   return {
     symbol,
-    price: entryPrice,
+    price: currentPrice,
     timeframe,
     type: mode === 'BULL' ? 'BULLISH' : 'BEARISH',
-    signal: mode === 'BULL' ? 'EMA_CROSS_BULL' : 'EMA_CROSS_BEAR',
-    timestamp: candles[idx].time,
-    entryPrice,
-    stopLoss: mode === 'BULL' ? entryPrice - (atr * 1.5) : entryPrice + (atr * 1.5),
-    takeProfit: mode === 'BULL' ? entryPrice + (atr * 3.75) : entryPrice - (atr * 3.75),
+    signal: mode === 'BULL' ? 'MOMENTUM_BULL' : 'MOMENTUM_BEAR', // Updated signal ID
+    timestamp: candles[finalIdx].time,
+    entryPrice: currentPrice,
+    stopLoss: mode === 'BULL' ? currentPrice - (atr * 1.5) : currentPrice + (atr * 1.5),
+    takeProfit: mode === 'BULL' ? currentPrice + (atr * 3.75) : currentPrice - (atr * 3.75),
   };
 }

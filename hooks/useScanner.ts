@@ -106,8 +106,8 @@ export const useScanner = (scanUniverse: string[]) => {
                     else if (tf === '1h') { setterBull = setBull1h; setterBear = setBear1h; }
                     else if (tf === '4h') { setterBull = setBull4h; setterBear = setBear4h; }
 
-                    updateMatchesStably(setterBull, cross?.signal === 'EMA_CROSS_BULL' ? cross : null, symbol, 'EMA_CROSS_BULL');
-                    updateMatchesStably(setterBear, cross?.signal === 'EMA_CROSS_BEAR' ? cross : null, symbol, 'EMA_CROSS_BEAR');
+                    updateMatchesStably(setterBull, cross?.signal === 'MOMENTUM_BULL' ? cross : null, symbol, 'MOMENTUM_BULL');
+                    updateMatchesStably(setterBear, cross?.signal === 'MOMENTUM_BEAR' ? cross : null, symbol, 'MOMENTUM_BEAR');
                 });
             }));
 
