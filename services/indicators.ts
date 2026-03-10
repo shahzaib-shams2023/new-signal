@@ -253,7 +253,7 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
 
   // 1. Logic Selection: Bullish or Bearish Impulse Momentum
   // - Bullish Impulse: 2-3 green candles
-  // - Pullback: 1-2 candles (Red or Small Body)
+  // - Pullback: 1 candle (Red or Small Body)
   // - Confirmation: Green, closes above all pullback highs
   // - Requirement: Confirmation candle must be CLOSED (not live).
 
@@ -279,18 +279,17 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
     const conf = candles[endIdx];
     if (!isBullish(conf)) return false;
 
-    for (let pbLen = 1; pbLen <= 2; pbLen++) {
-      const pbStart = endIdx - pbLen;
-      const pbCandles = candles.slice(pbStart, endIdx);
-      if (pbCandles.every(c => isBearish(c) || isSmallBody(c))) {
-        const pbHigh = Math.max(...pbCandles.map(c => c.high));
-        if (conf.close > pbHigh) {
-          for (let impLen = 2; impLen <= 3; impLen++) {
-            const impStart = pbStart - impLen;
-            if (impStart >= 0) {
-              const impCandles = candles.slice(impStart, pbStart);
-              if (impCandles.every(c => isBullish(c))) return true;
-            }
+    const pbLen = 1;
+    const pbStart = endIdx - pbLen;
+    const pbCandles = candles.slice(pbStart, endIdx);
+    if (pbCandles.every(c => isBearish(c) || isSmallBody(c))) {
+      const pbHigh = Math.max(...pbCandles.map(c => c.high));
+      if (conf.close > pbHigh) {
+        for (let impLen = 2; impLen <= 3; impLen++) {
+          const impStart = pbStart - impLen;
+          if (impStart >= 0) {
+            const impCandles = candles.slice(impStart, pbStart);
+            if (impCandles.every(c => isBullish(c))) return true;
           }
         }
       }
@@ -302,18 +301,17 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
     const conf = candles[endIdx];
     if (!isBearish(conf)) return false;
 
-    for (let pbLen = 1; pbLen <= 2; pbLen++) {
-      const pbStart = endIdx - pbLen;
-      const pbCandles = candles.slice(pbStart, endIdx);
-      if (pbCandles.every(c => isBullish(c) || isSmallBody(c))) {
-        const pbLow = Math.min(...pbCandles.map(c => c.low));
-        if (conf.close < pbLow) {
-          for (let impLen = 2; impLen <= 3; impLen++) {
-            const impStart = pbStart - impLen;
-            if (impStart >= 0) {
-              const impCandles = candles.slice(impStart, pbStart);
-              if (impCandles.every(c => isBearish(c))) return true;
-            }
+    const pbLen = 1;
+    const pbStart = endIdx - pbLen;
+    const pbCandles = candles.slice(pbStart, endIdx);
+    if (pbCandles.every(c => isBullish(c) || isSmallBody(c))) {
+      const pbLow = Math.min(...pbCandles.map(c => c.low));
+      if (conf.close < pbLow) {
+        for (let impLen = 2; impLen <= 3; impLen++) {
+          const impStart = pbStart - impLen;
+          if (impStart >= 0) {
+            const impCandles = candles.slice(impStart, pbStart);
+            if (impCandles.every(c => isBearish(c))) return true;
           }
         }
       }
