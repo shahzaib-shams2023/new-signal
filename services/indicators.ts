@@ -267,9 +267,9 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
 
   let mode: 'BULL' | 'BEAR' | 'NONE' = 'NONE';
 
-  // We identify the confirmation candle at idx = bars - 2 (the most recently closed candle)
-  // This ensures the candle is not "live".
-  const finalIdx = bars - 2;
+  // We identify the confirmation candle at idx = bars - 1 (the current live candle)
+  // This ensure the signals are generated early/live and not one candle old.
+  const finalIdx = bars - 1;
   if (finalIdx < 10) return null;
 
   const closes = candles.map(c => c.close);
