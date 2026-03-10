@@ -267,9 +267,9 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
 
   let mode: 'BULL' | 'BEAR' | 'NONE' = 'NONE';
 
-  // We identify the confirmation candle at idx = bars - 1 (the current live candle)
-  // This ensure the signals are generated early/live and not one candle old.
-  const finalIdx = bars - 1;
+  // We identify the confirmation candle index.
+  // offset = 0 means the live candle, offset = 1 means the last closed candle.
+  const finalIdx = bars - 1 - offset;
   if (finalIdx < 10) return null;
 
   const closes = candles.map(c => c.close);
@@ -370,7 +370,7 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
     type: mode === 'BULL' ? 'BULLISH' : 'BEARISH',
     signal: mode === 'BULL' ? 'MOMENTUM_BULL' : 'MOMENTUM_BEAR', // Updated signal ID
     timestamp: candles[finalIdx].time,
-    entryPrice: currentPrice,
+    entryPrice: candles[finalIdx].close,
     stopLoss: mode === 'BULL' ? currentPrice - (atr * 1.5) : currentPrice + (atr * 1.5),
     takeProfit: mode === 'BULL' ? currentPrice + (atr * 3.75) : currentPrice - (atr * 3.75),
   };

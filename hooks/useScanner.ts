@@ -95,7 +95,7 @@ export const useScanner = (scanUniverse: string[]) => {
                 // Process results for this timeframe
                 batch.forEach(symbol => {
                     const candles = batchData[symbol] || [];
-                    const cross = checkEMACross(symbol, candles, tf, 0);
+                    const cross = checkEMACross(symbol, candles, tf, 1);
 
                     // Map setter based on TF
                     let setterBull: any, setterBear: any;
