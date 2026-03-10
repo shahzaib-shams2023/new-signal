@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StrategyMatch, Candle } from '../types';
 import { fetchKlinesBatch, getRateLimitStatus } from '../services/binanceService';
-import { checkEMACross } from '../services/indicators';
+import { checkImpulseMomentum } from '../services/indicators';
 
 export const useScanner = (scanUniverse: string[]) => {
     const [bull1m, setBull1m] = useState<StrategyMatch[]>([]);
@@ -95,7 +95,13 @@ export const useScanner = (scanUniverse: string[]) => {
                 // Process results for this timeframe
                 batch.forEach(symbol => {
                     const candles = batchData[symbol] || [];
-                    const cross = checkEMACross(symbol, candles, tf, 1);
+                    if (candles.length < 20) return;
+
+                    // Check both last closed (1) and one before (2) so nothing is 'missed' if scanning is delayed
+                    const cross1 = checkImpulseMomentum(symbol, candles, tf, 1);
+                    const cross2 = checkImpulseMomentum(symbol, candles, tf, 2);
+
+                    const finalMatch = cross1 || cross2;
 
                     // Map setter based on TF
                     let setterBull: any, setterBear: any;
@@ -106,8 +112,8 @@ export const useScanner = (scanUniverse: string[]) => {
                     else if (tf === '1h') { setterBull = setBull1h; setterBear = setBear1h; }
                     else if (tf === '4h') { setterBull = setBull4h; setterBear = setBear4h; }
 
-                    updateMatchesStably(setterBull, cross?.signal === 'MOMENTUM_BULL' ? cross : null, symbol, 'MOMENTUM_BULL');
-                    updateMatchesStably(setterBear, cross?.signal === 'MOMENTUM_BEAR' ? cross : null, symbol, 'MOMENTUM_BEAR');
+                    updateMatchesStably(setterBull, finalMatch?.signal === 'MOMENTUM_BULL' ? finalMatch : null, symbol, 'MOMENTUM_BULL');
+                    updateMatchesStably(setterBear, finalMatch?.signal === 'MOMENTUM_BEAR' ? finalMatch : null, symbol, 'MOMENTUM_BEAR');
                 });
             }));
 

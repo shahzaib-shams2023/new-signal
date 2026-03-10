@@ -243,37 +243,31 @@ function calculateBollingerBands(closes: number[], period: number = 20, multipli
   return { upper, lower, basis };
 }
 
+
 // ─────────────────────────────────────────────────────────────────────────────
+//  Impulse Momentum Crossover Implementation
 // ─────────────────────────────────────────────────────────────────────────────
-//  EMA 5/8 Crossover Implementation
-// ─────────────────────────────────────────────────────────────────────────────
-export function checkEMACross(symbol: string, candles: Candle[], timeframe: string, offset = 0): StrategyMatch | null {
+export function checkImpulseMomentum(symbol: string, candles: Candle[], timeframe: string, offset = 1): StrategyMatch | null {
   const bars = candles.length;
   if (bars < 20) return null;
-
-  // 1. Logic Selection: Bullish or Bearish Impulse Momentum
-  // - Bullish Impulse: 2-3 green candles
-  // - Pullback: 1 candle (Red or Small Body)
-  // - Confirmation: Green, closes above all pullback highs
-  // - Requirement: Confirmation candle must be CLOSED (not live).
 
   const isBullish = (c: Candle) => c.close > c.open;
   const isBearish = (c: Candle) => c.close < c.open;
   const isSmallBody = (c: Candle) => {
     const body = Math.abs(c.close - c.open);
     const range = c.high - c.low;
-    return range === 0 ? true : body <= range * 0.35; // Body is < 35% of total range
+    return range === 0 ? true : body <= range * 0.35;
   };
 
   let mode: 'BULL' | 'BEAR' | 'NONE' = 'NONE';
 
   // We identify the confirmation candle index.
-  // offset = 0 means the live candle, offset = 1 means the last closed candle.
+  // offset = 1 means the last closed candle (most stable for 'recent').
   const finalIdx = bars - 1 - offset;
   if (finalIdx < 10) return null;
 
   const closes = candles.map(c => c.close);
-  const currentPrice = candles[bars - 1].close; // Still use latest price for entry
+  const currentPrice = candles[bars - 1].close;
 
   const checkBullish = (endIdx: number): boolean => {
     const conf = candles[endIdx];
@@ -324,7 +318,6 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
 
   if (mode === 'NONE') return null;
 
-  // 2. Momentum & Volatility Confirmation using 'finalIdx' (The closed confirmation bar)
   const finalPrevIdx = finalIdx - 1;
   const macdHist = calculateMACDHistogram(closes);
   if (mode === 'BULL') {
@@ -340,15 +333,12 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
     if (rsiArr[finalIdx] > 60 || rsiArr[finalIdx] < 20) return null;
   }
 
-  // 3. Volume Verification
   const volumes = candles.map(c => c.volume);
   let avgVol = 0;
   for (let i = Math.max(0, finalIdx - 20); i <= finalIdx; i++) avgVol += volumes[i];
   avgVol /= 21;
+  if (volumes[finalIdx] < avgVol * 1.1) return null;
 
-  if (volumes[finalIdx] < avgVol * 1.1) return null; // Relaxed slightly from 1.2 to 1.1
-
-  // 4. Trend & Institutional Filters
   const adxArr = calculateADX(candles, 14).adx;
   if (!isNaN(adxArr[finalIdx]) && adxArr[finalIdx] < 18) return null;
 
@@ -368,10 +358,11 @@ export function checkEMACross(symbol: string, candles: Candle[], timeframe: stri
     price: currentPrice,
     timeframe,
     type: mode === 'BULL' ? 'BULLISH' : 'BEARISH',
-    signal: mode === 'BULL' ? 'MOMENTUM_BULL' : 'MOMENTUM_BEAR', // Updated signal ID
+    signal: mode === 'BULL' ? 'MOMENTUM_BULL' : 'MOMENTUM_BEAR',
     timestamp: candles[finalIdx].time,
     entryPrice: candles[finalIdx].close,
     stopLoss: mode === 'BULL' ? currentPrice - (atr * 1.5) : currentPrice + (atr * 1.5),
     takeProfit: mode === 'BULL' ? currentPrice + (atr * 3.75) : currentPrice - (atr * 3.75),
   };
 }
+

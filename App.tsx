@@ -22,7 +22,7 @@ const App: React.FC = () => {
 
   // Derived Statistics
   const allSignals = useMemo(() => {
-    const cutoff = Date.now() - (48 * 60 * 60 * 1000); // 48h history
+    const cutoff = Date.now() - (2 * 60 * 60 * 1000); // 2h recent only
     const signals = [
       ...bull1m, ...bear1m,
       ...bull5m, ...bear5m,
