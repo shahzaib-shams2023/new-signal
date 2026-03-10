@@ -276,7 +276,7 @@ export function checkImpulseMomentum(symbol: string, candles: Candle[], timefram
     const pbLen = 1;
     const pbStart = endIdx - pbLen;
     const pbCandles = candles.slice(pbStart, endIdx);
-    if (pbCandles.every(c => isBearish(c) || isSmallBody(c))) {
+    if (pbCandles.every(c => isBearish(c))) {
       const pbHigh = Math.max(...pbCandles.map(c => c.high));
       if (conf.close > pbHigh) {
         for (let impLen = 2; impLen <= 3; impLen++) {
@@ -298,7 +298,7 @@ export function checkImpulseMomentum(symbol: string, candles: Candle[], timefram
     const pbLen = 1;
     const pbStart = endIdx - pbLen;
     const pbCandles = candles.slice(pbStart, endIdx);
-    if (pbCandles.every(c => isBullish(c) || isSmallBody(c))) {
+    if (pbCandles.every(c => isBullish(c))) {
       const pbLow = Math.min(...pbCandles.map(c => c.low));
       if (conf.close < pbLow) {
         for (let impLen = 2; impLen <= 3; impLen++) {
