@@ -243,82 +243,58 @@ function calculateBollingerBands(closes: number[], period: number = 20, multipli
   return { upper, lower, basis };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Helper: TEMA (Triple Exponential Moving Average)
+// ─────────────────────────────────────────────────────────────────────────────
+function calculateTEMA(data: number[], period: number): number[] {
+  const ema1 = calculateEMA(data, period);
+  const ema2 = calculateEMA(ema1, period);
+  const ema3 = calculateEMA(ema2, period);
+
+  return data.map((_, i) => {
+    if (isNaN(ema1[i]) || isNaN(ema2[i]) || isNaN(ema3[i])) return NaN;
+    return 3 * ema1[i] - 3 * ema2[i] + ema3[i];
+  });
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Impulse Momentum Crossover Implementation
+//  TEMA 5/8 Crossover Implementation
 // ─────────────────────────────────────────────────────────────────────────────
-export function checkImpulseMomentum(symbol: string, candles: Candle[], timeframe: string, offset = 1): StrategyMatch | null {
+export function checkTEMACrossover(symbol: string, candles: Candle[], timeframe: string, offset = 1): StrategyMatch | null {
   const bars = candles.length;
-  if (bars < 20) return null;
-
-  const isBullish = (c: Candle) => c.close > c.open;
-  const isBearish = (c: Candle) => c.close < c.open;
-  const isSmallBody = (c: Candle) => {
-    const body = Math.abs(c.close - c.open);
-    const range = c.high - c.low;
-    return range === 0 ? true : body <= range * 0.35;
-  };
-
-  let mode: 'BULL' | 'BEAR' | 'NONE' = 'NONE';
+  if (bars < 25) return null;
 
   // We identify the confirmation candle index.
-  // offset = 1 means the last closed candle (most stable for 'recent').
+  // offset = 1 means the last closed candle.
   const finalIdx = bars - 1 - offset;
   if (finalIdx < 10) return null;
+  const finalPrevIdx = finalIdx - 1;
 
   const closes = candles.map(c => c.close);
   const currentPrice = candles[bars - 1].close;
 
-  const checkBullish = (endIdx: number): boolean => {
-    const conf = candles[endIdx];
-    if (!isBullish(conf)) return false;
+  // Calculate TEMA 5 and 8
+  const tema5 = calculateTEMA(closes, 5);
+  const tema8 = calculateTEMA(closes, 8);
 
-    const pbLen = 1;
-    const pbStart = endIdx - pbLen;
-    const pbCandles = candles.slice(pbStart, endIdx);
-    if (pbCandles.every(c => isBearish(c))) {
-      const pbHigh = Math.max(...pbCandles.map(c => c.high));
-      if (conf.close > pbHigh) {
-        for (let impLen = 2; impLen <= 3; impLen++) {
-          const impStart = pbStart - impLen;
-          if (impStart >= 0) {
-            const impCandles = candles.slice(impStart, pbStart);
-            if (impCandles.every(c => isBullish(c))) return true;
-          }
-        }
-      }
-    }
-    return false;
-  };
+  let mode: 'BULL' | 'BEAR' | 'NONE' = 'NONE';
 
-  const checkBearish = (endIdx: number): boolean => {
-    const conf = candles[endIdx];
-    if (!isBearish(conf)) return false;
-
-    const pbLen = 1;
-    const pbStart = endIdx - pbLen;
-    const pbCandles = candles.slice(pbStart, endIdx);
-    if (pbCandles.every(c => isBullish(c))) {
-      const pbLow = Math.min(...pbCandles.map(c => c.low));
-      if (conf.close < pbLow) {
-        for (let impLen = 2; impLen <= 3; impLen++) {
-          const impStart = pbStart - impLen;
-          if (impStart >= 0) {
-            const impCandles = candles.slice(impStart, pbStart);
-            if (impCandles.every(c => isBearish(c))) return true;
-          }
-        }
-      }
-    }
-    return false;
-  };
-
-  if (checkBullish(finalIdx)) mode = 'BULL';
-  else if (checkBearish(finalIdx)) mode = 'BEAR';
+  // Check for Crossover
+  // Bullish: TEMA 5 crosses above TEMA 8
+  if (tema5[finalIdx] > tema8[finalIdx] && tema5[finalPrevIdx] <= tema8[finalPrevIdx]) {
+    mode = 'BULL';
+  }
+  // Bearish: TEMA 5 crosses below TEMA 8
+  else if (tema5[finalIdx] < tema8[finalIdx] && tema5[finalPrevIdx] >= tema8[finalPrevIdx]) {
+    mode = 'BEAR';
+  }
 
   if (mode === 'NONE') return null;
 
-  const finalPrevIdx = finalIdx - 1;
+  // --- VALIDATIONS ---
+
+  // 1. MACD Histogram Validation
   const macdHist = calculateMACDHistogram(closes);
   if (mode === 'BULL') {
     if (macdHist[finalIdx] <= 0 || macdHist[finalIdx] <= macdHist[finalPrevIdx]) return null;
@@ -326,30 +302,39 @@ export function checkImpulseMomentum(symbol: string, candles: Candle[], timefram
     if (macdHist[finalIdx] >= 0 || macdHist[finalIdx] >= macdHist[finalPrevIdx]) return null;
   }
 
+  // 2. RSI Validation
   const rsiArr = calculateRSI(closes, 14);
+  const currentRsi = rsiArr[finalIdx];
   if (mode === 'BULL') {
-    if (rsiArr[finalIdx] < 40 || rsiArr[finalIdx] > 80) return null;
+    if (currentRsi < 40 || currentRsi > 80) return null;
   } else {
-    if (rsiArr[finalIdx] > 60 || rsiArr[finalIdx] < 20) return null;
+    if (currentRsi > 60 || currentRsi < 20) return null;
   }
 
+  // 3. Volume Validation (Spike above average)
   const volumes = candles.map(c => c.volume);
   let avgVol = 0;
-  for (let i = Math.max(0, finalIdx - 20); i <= finalIdx; i++) avgVol += volumes[i];
-  avgVol /= 21;
+  const volPeriod = 20;
+  for (let i = Math.max(0, finalIdx - volPeriod); i <= finalIdx; i++) avgVol += volumes[i];
+  avgVol /= (volPeriod + 1);
   if (volumes[finalIdx] < avgVol * 1.1) return null;
 
-  const adxArr = calculateADX(candles, 14).adx;
-  if (!isNaN(adxArr[finalIdx]) && adxArr[finalIdx] < 18) return null;
+  // 4. ADX Validation (Trend strength)
+  const adxData = calculateADX(candles, 14);
+  const currentAdx = adxData.adx[finalIdx];
+  if (!isNaN(currentAdx) && currentAdx < 18) return null;
 
+  // 5. VWMA Validation (Price relationship to volume-weighted average)
   const vwmaArr = calculateVWMA(candles, 20);
-  if (mode === 'BULL' && candles[finalIdx].close < vwmaArr[finalIdx]) return null;
-  if (mode === 'BEAR' && candles[finalIdx].close > vwmaArr[finalIdx]) return null;
+  if (mode === 'BULL' && closes[finalIdx] < vwmaArr[finalIdx]) return null;
+  if (mode === 'BEAR' && closes[finalIdx] > vwmaArr[finalIdx]) return null;
 
+  // 6. Bollinger Bands Validation (Confirm breakout strength)
   const bb = calculateBollingerBands(closes, 20, 2);
-  if (mode === 'BULL' && candles[finalIdx].close < bb.upper[finalIdx]) return null;
-  if (mode === 'BEAR' && candles[finalIdx].close > bb.lower[finalIdx]) return null;
+  if (mode === 'BULL' && closes[finalIdx] < bb.upper[finalIdx]) return null;
+  if (mode === 'BEAR' && closes[finalIdx] > bb.lower[finalIdx]) return null;
 
+  // --- SIGNAL GENERATION ---
   const atrArr = calculateATR(candles, 14);
   const atr = atrArr[finalIdx];
 
@@ -358,9 +343,9 @@ export function checkImpulseMomentum(symbol: string, candles: Candle[], timefram
     price: currentPrice,
     timeframe,
     type: mode === 'BULL' ? 'BULLISH' : 'BEARISH',
-    signal: mode === 'BULL' ? 'MOMENTUM_BULL' : 'MOMENTUM_BEAR',
+    signal: mode === 'BULL' ? 'TEMA_CROSS_BULL' : 'TEMA_CROSS_BEAR',
     timestamp: candles[finalIdx].time,
-    entryPrice: candles[finalIdx].close,
+    entryPrice: closes[finalIdx],
     stopLoss: mode === 'BULL' ? currentPrice - (atr * 1.5) : currentPrice + (atr * 1.5),
     takeProfit: mode === 'BULL' ? currentPrice + (atr * 3.75) : currentPrice - (atr * 3.75),
   };

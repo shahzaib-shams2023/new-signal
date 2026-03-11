@@ -26,8 +26,8 @@ export interface StrategyMatch {
   signal:
   | 'EMA_CROSS_BULL'
   | 'EMA_CROSS_BEAR'
-  | 'MOMENTUM_BULL'
-  | 'MOMENTUM_BEAR';
+  | 'TEMA_CROSS_BULL'
+  | 'TEMA_CROSS_BEAR';
   timestamp: number;
   entryPrice?: number;
   stopLoss?: number;
