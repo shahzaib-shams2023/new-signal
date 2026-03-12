@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StrategyMatch, Candle } from '../types';
 import { fetchKlinesBatch, getRateLimitStatus } from '../services/binanceService';
-import { checkTEMACrossover } from '../services/indicators';
+import { checkEMACrossover } from '../services/indicators';
 
 export const useScanner = (scanUniverse: string[]) => {
     const [bull1m, setBull1m] = useState<StrategyMatch[]>([]);
@@ -98,8 +98,8 @@ export const useScanner = (scanUniverse: string[]) => {
                     if (candles.length < 20) return;
 
                     // Check both last closed (1) and one before (2) so nothing is 'missed' if scanning is delayed
-                    const cross1 = checkTEMACrossover(symbol, candles, tf, 1);
-                    const cross2 = checkTEMACrossover(symbol, candles, tf, 2);
+                    const cross1 = checkEMACrossover(symbol, candles, tf, 1);
+                    const cross2 = checkEMACrossover(symbol, candles, tf, 2);
 
                     const finalMatch = cross1 || cross2;
 
@@ -112,8 +112,8 @@ export const useScanner = (scanUniverse: string[]) => {
                     else if (tf === '1h') { setterBull = setBull1h; setterBear = setBear1h; }
                     else if (tf === '4h') { setterBull = setBull4h; setterBear = setBear4h; }
 
-                    updateMatchesStably(setterBull, finalMatch?.signal === 'TEMA_CROSS_BULL' ? finalMatch : null, symbol, 'TEMA_CROSS_BULL');
-                    updateMatchesStably(setterBear, finalMatch?.signal === 'TEMA_CROSS_BEAR' ? finalMatch : null, symbol, 'TEMA_CROSS_BEAR');
+                    updateMatchesStably(setterBull, finalMatch?.signal === 'EMA_CROSS_BULL' ? finalMatch : null, symbol, 'EMA_CROSS_BULL');
+                    updateMatchesStably(setterBear, finalMatch?.signal === 'EMA_CROSS_BEAR' ? finalMatch : null, symbol, 'EMA_CROSS_BEAR');
                 });
             }));
 

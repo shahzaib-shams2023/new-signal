@@ -405,7 +405,7 @@ export const fetchTickers = async (): Promise<SymbolInfo[]> => {
     const gainersEnriched = [...enriched]
       .filter((a) => a.numVolume > 10000000 && a.numChange > 0) // Minimum 10M volume and must be a gainer
       .sort((a, b) => b.numChange - a.numChange)
-      .slice(0, 100);
+      .slice(0, 10);
 
     // 3. Return only the top 100 gainers
     return gainersEnriched.map(e => e.ticker);

@@ -7,10 +7,8 @@ interface SignalBadgeProps {
 }
 
 export const SignalBadge: React.FC<SignalBadgeProps> = ({ signal }) => {
-    const isBull = signal === 'TEMA_CROSS_BULL' || signal === 'EMA_CROSS_BULL';
-    const label = signal.includes('EMA_CROSS')
-        ? `⭐ EMA CROSS (${isBull ? 'BULL' : 'BEAR'})`
-        : `⚡ TEMA CROSS (${isBull ? 'BULL' : 'BEAR'})`;
+    const isBull = signal === 'EMA_CROSS_BULL';
+    const label = `⭐ EMA CROSS 5/8 (${isBull ? 'BULL' : 'BEAR'})`;
 
     return (
         <span className={`text-[10px] font-black px-2 py-0.5 rounded border tracking-wider animate-in fade-in zoom-in duration-300 ${isBull

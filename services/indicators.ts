@@ -244,24 +244,9 @@ function calculateBollingerBands(closes: number[], period: number = 20, multipli
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Helper: TEMA (Triple Exponential Moving Average)
+//  EMA 5/8 Crossover Implementation
 // ─────────────────────────────────────────────────────────────────────────────
-function calculateTEMA(data: number[], period: number): number[] {
-  const ema1 = calculateEMA(data, period);
-  const ema2 = calculateEMA(ema1, period);
-  const ema3 = calculateEMA(ema2, period);
-
-  return data.map((_, i) => {
-    if (isNaN(ema1[i]) || isNaN(ema2[i]) || isNaN(ema3[i])) return NaN;
-    return 3 * ema1[i] - 3 * ema2[i] + ema3[i];
-  });
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  TEMA 5/8 Crossover Implementation
-// ─────────────────────────────────────────────────────────────────────────────
-export function checkTEMACrossover(symbol: string, candles: Candle[], timeframe: string, offset = 1): StrategyMatch | null {
+export function checkEMACrossover(symbol: string, candles: Candle[], timeframe: string, offset = 1): StrategyMatch | null {
   const bars = candles.length;
   if (bars < 25) return null;
 
@@ -274,19 +259,19 @@ export function checkTEMACrossover(symbol: string, candles: Candle[], timeframe:
   const closes = candles.map(c => c.close);
   const currentPrice = candles[bars - 1].close;
 
-  // Calculate TEMA 5 and 8
-  const tema5 = calculateTEMA(closes, 5);
-  const tema8 = calculateTEMA(closes, 8);
+  // Calculate EMA 5 and 8
+  const ema5 = calculateEMA(closes, 5);
+  const ema8 = calculateEMA(closes, 8);
 
   let mode: 'BULL' | 'BEAR' | 'NONE' = 'NONE';
 
   // Check for Crossover
-  // Bullish: TEMA 5 crosses above TEMA 8
-  if (tema5[finalIdx] > tema8[finalIdx] && tema5[finalPrevIdx] <= tema8[finalPrevIdx]) {
+  // Bullish: EMA 5 crosses above EMA 8
+  if (ema5[finalIdx] > ema8[finalIdx] && ema5[finalPrevIdx] <= ema8[finalPrevIdx]) {
     mode = 'BULL';
   }
-  // Bearish: TEMA 5 crosses below TEMA 8
-  else if (tema5[finalIdx] < tema8[finalIdx] && tema5[finalPrevIdx] >= tema8[finalPrevIdx]) {
+  // Bearish: EMA 5 crosses below EMA 8
+  else if (ema5[finalIdx] < ema8[finalIdx] && ema5[finalPrevIdx] >= ema8[finalPrevIdx]) {
     mode = 'BEAR';
   }
 
@@ -343,7 +328,7 @@ export function checkTEMACrossover(symbol: string, candles: Candle[], timeframe:
     price: currentPrice,
     timeframe,
     type: mode === 'BULL' ? 'BULLISH' : 'BEARISH',
-    signal: mode === 'BULL' ? 'TEMA_CROSS_BULL' : 'TEMA_CROSS_BEAR',
+    signal: mode === 'BULL' ? 'EMA_CROSS_BULL' : 'EMA_CROSS_BEAR',
     timestamp: candles[finalIdx].time,
     entryPrice: closes[finalIdx],
     stopLoss: mode === 'BULL' ? currentPrice - (atr * 1.5) : currentPrice + (atr * 1.5),
