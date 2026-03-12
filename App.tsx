@@ -174,7 +174,7 @@ const App: React.FC = () => {
                   <div className="flex items-center gap-4 text-[9px] text-gray-600 font-black uppercase tracking-widest">
                     <span>Protocol v1.10</span>
                     <span className="w-1 h-1 rounded-full bg-white/20" />
-                    <span>Impulse & Parabolic Analytics</span>
+                    <span>Impulse Analytics</span>
                   </div>
                 </div>
                 <LiveSignalsFeed allSignals={allSignals} tickerMap={tickerMap} />

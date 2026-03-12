@@ -151,43 +151,5 @@ export function detectImpulseSignal(symbol: string, candles: Candle[], timeframe
   }
 }
 
-/**
- * Detects Parabolic Volume signals where volume is significantly higher (3.5x+) 
- * than the average of the previous 20 candles.
- */
-export function detectParabolicSignal(symbol: string, candles: Candle[], timeframe: string, offset = 1): StrategyMatch | null {
-  const bars = candles.length;
-  const period = 20;
-  if (bars < period + 2) return null;
 
-  const finalIdx = bars - 1 - offset;
-  if (finalIdx < period) return null;
 
-  // Calculate average volume of previous 20 candles (excluding current)
-  let sumVol = 0;
-  for (let i = finalIdx - period; i < finalIdx; i++) {
-    sumVol += candles[i].volume;
-  }
-  const avgVol = sumVol / period;
-  const currentVol = candles[finalIdx].volume;
-
-  // Check if current volume is at least 3.5x the average
-  const isParabolic = currentVol > avgVol * 3.5;
-  if (!isParabolic) return null;
-
-  const isGreen = candles[finalIdx].close > candles[finalIdx].open;
-  const mode: 'BULLISH' | 'BEARISH' = isGreen ? 'BULLISH' : 'BEARISH';
-  const signalId = isGreen ? 'PARABOLIC_BULL' : 'PARABOLIC_BEAR';
-
-  return {
-    symbol,
-    price: candles[bars - 1].close,
-    timeframe,
-    type: mode,
-    signal: signalId,
-    timestamp: candles[finalIdx].time,
-    entryPrice: candles[finalIdx].close,
-    stopLoss: isGreen ? candles[finalIdx].low : candles[finalIdx].high,
-    takeProfit: isGreen ? candles[finalIdx].close * 1.05 : candles[finalIdx].close * 0.95,
-  };
-}

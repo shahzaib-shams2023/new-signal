@@ -25,9 +25,7 @@ export interface StrategyMatch {
   type: 'BULLISH' | 'BEARISH';
   signal:
   | 'IMPULSE_BULL'
-  | 'IMPULSE_BEAR'
-  | 'PARABOLIC_BULL'
-  | 'PARABOLIC_BEAR';
+  | 'IMPULSE_BEAR';
   timestamp: number;
   entryPrice?: number;
   stopLoss?: number;

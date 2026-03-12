@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StrategyMatch, Candle } from '../types';
 import { fetchKlinesBatch, getRateLimitStatus, subscribeKlines } from '../services/binanceService';
-import { detectImpulseSignal, detectParabolicSignal } from '../services/indicators';
+import { detectImpulseSignal } from '../services/indicators';
 
 export const useScanner = (scanUniverse: string[]) => {
     const [bull15m, setBull15m] = useState<StrategyMatch[]>([]);
@@ -102,11 +102,9 @@ export const useScanner = (scanUniverse: string[]) => {
                     const candles = batchData[symbol] || [];
                     if (candles.length < 25) return;
 
-                    // Check for both Impulse and Parabolic signals on the most recent closed candle (offset 1)
+                    // Check for Impulse signals on the most recent closed candle (offset 1)
                     const impulseMatch = detectImpulseSignal(symbol, candles, tf, 1);
-                    const parabolicMatch = detectParabolicSignal(symbol, candles, tf, 1);
-
-                    const finalMatch = impulseMatch || parabolicMatch;
+                    const finalMatch = impulseMatch;
 
                     if (finalMatch) {
                         // Map setter based on TF

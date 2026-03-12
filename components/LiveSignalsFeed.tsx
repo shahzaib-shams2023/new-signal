@@ -36,7 +36,7 @@ export const LiveSignalsFeed = React.memo<LiveSignalsFeedProps>(({ allSignals, t
                 <div className="flex flex-col items-center gap-2">
                     <span className="text-xs font-black uppercase tracking-[0.4em] text-white/40">Synchronizing Intelligence Streams</span>
                     <span className="text-[10px] uppercase font-bold text-white/20 tracking-widest text-center max-w-xs leading-relaxed">
-                        Scanning assets for volume-backed impulse and parabolic moves. Predictive vectors manifest here in real-time.
+                        Scanning assets for volume-backed impulse moves. Predictive vectors manifest here in real-time.
                     </span>
                 </div>
             </div>
