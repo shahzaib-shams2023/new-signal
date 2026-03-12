@@ -24,8 +24,6 @@ export interface StrategyMatch {
   timeframe: string;
   type: 'BULLISH' | 'BEARISH';
   signal:
-  | 'EMA_CROSS_BULL'
-  | 'EMA_CROSS_BEAR'
   | 'IMPULSE_BULL'
   | 'IMPULSE_BEAR'
   | 'PARABOLIC_BULL'
