@@ -403,7 +403,7 @@ export const fetchTickers = async (): Promise<SymbolInfo[]> => {
 
     // 2. Identify coins between 5% and 10% gain
     const gainersEnriched = [...enriched]
-      .filter((a) => a.numVolume > 10000000 && a.numChange >= 5 && a.numChange <= 10) // 5% to 10% range
+      .filter((a) => a.numVolume > 10000000 && a.numChange >= 2 && a.numChange <= 10) // 5% to 10% range
       .sort((a, b) => b.numChange - a.numChange);
 
     // 3. Return the filtered coins
