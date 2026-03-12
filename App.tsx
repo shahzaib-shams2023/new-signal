@@ -22,7 +22,7 @@ const App: React.FC = () => {
 
   // Derived Statistics
   const allSignals = useMemo(() => {
-    const cutoff = Date.now() - (2 * 60 * 60 * 1000); // 2h recent only
+    const now = Date.now();
     const signals = [
       ...bull15m, ...bear15m,
       ...bull30m, ...bear30m,
@@ -30,7 +30,14 @@ const App: React.FC = () => {
       ...bull4h, ...bear4h
     ];
     return signals
-      .filter(s => s.timestamp > cutoff)
+      .filter(s => {
+        const ageMs = now - s.timestamp;
+        // 4h signals have a timestamp at the start of the 4h candle. 
+        // We want to see them for at least 8-12 hours.
+        if (s.timeframe === '4h') return ageMs < 12 * 60 * 60 * 1000;
+        if (s.timeframe === '1h') return ageMs < 4 * 60 * 60 * 1000;
+        return ageMs < 2 * 60 * 60 * 1000; // 2h for 15m/30m
+      })
       .sort((a, b) => b.timestamp - a.timestamp);
   }, [bull15m, bear15m, bull30m, bear30m, bull1h, bear1h, bull4h, bear4h]);
 
