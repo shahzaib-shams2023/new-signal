@@ -5,10 +5,6 @@ import { fetchKlinesBatch, getRateLimitStatus } from '../services/binanceService
 import { detectImpulseSignal, detectParabolicSignal } from '../services/indicators';
 
 export const useScanner = (scanUniverse: string[]) => {
-    const [bull1m, setBull1m] = useState<StrategyMatch[]>([]);
-    const [bear1m, setBear1m] = useState<StrategyMatch[]>([]);
-    const [bull5m, setBull5m] = useState<StrategyMatch[]>([]);
-    const [bear5m, setBear5m] = useState<StrategyMatch[]>([]);
     const [bull15m, setBull15m] = useState<StrategyMatch[]>([]);
     const [bear15m, setBear15m] = useState<StrategyMatch[]>([]);
     const [bull30m, setBull30m] = useState<StrategyMatch[]>([]);
@@ -94,7 +90,7 @@ export const useScanner = (scanUniverse: string[]) => {
             setScanStatus(batch.slice(0, 3).join(', ') + '…');
 
             // Parallelize scanning of multiple timeframes across the whole batch
-            const tfs = ['1m', '5m', '15m', '30m', '1h', '4h'];
+            const tfs = ['15m', '30m', '1h', '4h'];
             await Promise.all(tfs.map(async (tf) => {
                 const batchData = await fetchKlinesBatch(batch, tf, 120);
 
@@ -112,9 +108,7 @@ export const useScanner = (scanUniverse: string[]) => {
                     if (finalMatch) {
                         // Map setter based on TF
                         let setterBull: any, setterBear: any;
-                        if (tf === '1m') { setterBull = setBull1m; setterBear = setBear1m; }
-                        else if (tf === '5m') { setterBull = setBull5m; setterBear = setBear5m; }
-                        else if (tf === '15m') { setterBull = setBull15m; setterBear = setBear15m; }
+                        if (tf === '15m') { setterBull = setBull15m; setterBear = setBear15m; }
                         else if (tf === '30m') { setterBull = setBull30m; setterBear = setBear30m; }
                         else if (tf === '1h') { setterBull = setBull1h; setterBear = setBear1h; }
                         else if (tf === '4h') { setterBull = setBull4h; setterBear = setBear4h; }
@@ -144,7 +138,7 @@ export const useScanner = (scanUniverse: string[]) => {
     }, [scanUniverse.length > 0]);
 
     return {
-        bull1m, bear1m, bull5m, bear5m, bull15m, bear15m, bull30m, bear30m,
+        bull15m, bear15m, bull30m, bear30m,
         bull1h, bear1h, bull4h, bear4h,
         totalScanned, scanStatus, weightInfo
     };

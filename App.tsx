@@ -12,7 +12,7 @@ import { formatPrice } from './utils/formatters';
 const App: React.FC = () => {
   const { tickers, scanUniverse, tickerMap } = useTickers();
   const {
-    bull1m, bear1m, bull5m, bear5m, bull15m, bear15m, bull30m, bear30m,
+    bull15m, bear15m, bull30m, bear30m,
     bull1h, bear1h, bull4h, bear4h,
     totalScanned, scanStatus, weightInfo
   } = useScanner(scanUniverse);
@@ -24,8 +24,6 @@ const App: React.FC = () => {
   const allSignals = useMemo(() => {
     const cutoff = Date.now() - (2 * 60 * 60 * 1000); // 2h recent only
     const signals = [
-      ...bull1m, ...bear1m,
-      ...bull5m, ...bear5m,
       ...bull15m, ...bear15m,
       ...bull30m, ...bear30m,
       ...bull1h, ...bear1h,
@@ -34,7 +32,7 @@ const App: React.FC = () => {
     return signals
       .filter(s => s.timestamp > cutoff)
       .sort((a, b) => b.timestamp - a.timestamp);
-  }, [bull1m, bear1m, bull5m, bear5m, bull15m, bear15m, bull30m, bear30m, bull1h, bear1h, bull4h, bear4h]);
+  }, [bull15m, bear15m, bull30m, bear30m, bull1h, bear1h, bull4h, bear4h]);
 
   const activeSignalMap = useMemo(() => {
     const map = new Map<string, StrategyMatch>();
@@ -177,16 +175,6 @@ const App: React.FC = () => {
             ) : (
               <div className="space-y-16">
                 <div className="space-y-12">
-                  <div className="space-y-6">
-                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-4">Trend Matrix (1m)</h3>
-                    <CollapsibleSection title="High Conviction Bullish" timeframe="1m" matches={bull1m} tickerMap={tickerMap} color="emerald" />
-                    <CollapsibleSection title="Strategic Exit & Short" timeframe="1m" matches={bear1m} tickerMap={tickerMap} color="rose" />
-                  </div>
-                  <div className="space-y-6">
-                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-4">Trend Matrix (5m)</h3>
-                    <CollapsibleSection title="High Conviction Bullish" timeframe="5m" matches={bull5m} tickerMap={tickerMap} color="emerald" />
-                    <CollapsibleSection title="Strategic Exit & Short" timeframe="5m" matches={bear5m} tickerMap={tickerMap} color="rose" />
-                  </div>
                   <div className="space-y-6">
                     <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-4">Trend Matrix (15m)</h3>
                     <CollapsibleSection title="High Conviction Bullish" timeframe="15m" matches={bull15m} tickerMap={tickerMap} color="emerald" />
