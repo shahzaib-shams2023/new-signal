@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { StrategyMatch, Candle } from '../types';
-import { fetchKlinesBatch, getRateLimitStatus } from '../services/binanceService';
+import { fetchKlinesBatch, getRateLimitStatus, subscribeKlines } from '../services/binanceService';
 import { detectImpulseSignal, detectParabolicSignal } from '../services/indicators';
 
 export const useScanner = (scanUniverse: string[]) => {
@@ -79,12 +79,15 @@ export const useScanner = (scanUniverse: string[]) => {
             }
 
             const idx = scanIndexRef.current % currentUniverse.length;
-            const BATCH_SIZE = 10;
+            const BATCH_SIZE = 20;
             const batch = currentUniverse.slice(idx, idx + BATCH_SIZE);
             if (batch.length < BATCH_SIZE && currentUniverse.length > BATCH_SIZE) {
                 // Wrap around to get a full batch if near the end
                 batch.push(...currentUniverse.slice(0, BATCH_SIZE - batch.length));
             }
+
+            // Proactively subscribe to WebSockets for this batch to keep cache warm (0 weight REST calls)
+            subscribeKlines(batch, ['15m', '30m', '1h', '4h']);
 
             // Display up to 3 coins to prevent the UI from looking stuck on just 1
             setScanStatus(batch.slice(0, 3).join(', ') + '…');

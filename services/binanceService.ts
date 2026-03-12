@@ -216,12 +216,10 @@ interface CacheEntry {
 const candleCache = new Map<string, CacheEntry>();
 
 const CANDLE_TTL: Record<string, number> = {
-  '1m': 55_000,        // 55 s  (just under 1 candle period)
-  '5m': 4 * 60_000 + 55_000,    // 4 min 55s
-  '15m': 14 * 60_000 + 55_000,  // 14 min 55s
-  '30m': 29 * 60_000 + 55_000,  // 29 min 55s
-  '1h': 59 * 60_000 + 55_000,   // 59 min 55s
-  '4h': 3 * 60 * 60 * 1000 + 59 * 60_000 + 55_000, // 3h 59m 55s
+  '15m': 60_000 * 14.5, // 14.5 mins
+  '30m': 60_000 * 29.5, // 29.5 mins
+  '1h': 60_000 * 59.5,  // 59.5 mins
+  '4h': 60_000 * 239.5, // 3h 59.5m
 };
 
 function getCached(key: string, interval: string): Candle[] | null {
@@ -368,12 +366,22 @@ function createAutoReconnectWs(
  * Fetch ALL USD-M futures tickers + exchange info in two lightweight requests.
  * Weight: /ticker/24hr = 40, /exchangeInfo = 1 → total 41
  */
+let cachedExchangeInfo: any = null;
+let lastExchangeInfoFetch = 0;
+
 export const fetchTickers = async (): Promise<SymbolInfo[]> => {
   try {
+    const shouldFetchEI = !cachedExchangeInfo || (Date.now() - lastExchangeInfoFetch > 3600_000);
+
     const [tickers, exchangeInfo] = await Promise.all([
       enqueue<any[]>('/ticker/24hr', 40),
-      enqueue<any>('/exchangeInfo', 1),
+      shouldFetchEI ? enqueue<any>('/exchangeInfo', 1) : Promise.resolve(cachedExchangeInfo),
     ]);
+
+    if (shouldFetchEI) {
+      cachedExchangeInfo = exchangeInfo;
+      lastExchangeInfoFetch = Date.now();
+    }
 
     const activeSet = new Set<string>(
       exchangeInfo.symbols
