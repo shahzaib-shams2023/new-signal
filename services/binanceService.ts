@@ -401,13 +401,12 @@ export const fetchTickers = async (): Promise<SymbolInfo[]> => {
         numVolume: parseFloat(t.quoteVolume)
       }));
 
-    // 2. Identify Top 100 Gainers
+    // 2. Identify coins between 5% and 10% gain
     const gainersEnriched = [...enriched]
-      .filter((a) => a.numVolume > 10000000 && a.numChange > 0) // Minimum 10M volume and must be a gainer
-      .sort((a, b) => b.numChange - a.numChange)
-      .slice(0, 10);
+      .filter((a) => a.numVolume > 10000000 && a.numChange >= 5 && a.numChange <= 10) // 5% to 10% range
+      .sort((a, b) => b.numChange - a.numChange);
 
-    // 3. Return only the top 100 gainers
+    // 3. Return the filtered coins
     return gainersEnriched.map(e => e.ticker);
   } catch (error) {
     console.error('fetchTickers error:', error);

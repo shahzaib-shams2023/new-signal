@@ -50,7 +50,10 @@ export const useTickers = () => {
                     quoteVolume: u.q ?? t.quoteVolume,
                     volume: u.v ?? t.volume
                 };
-            }).filter(t => parseFloat(t.priceChangePercent) > 0));
+            }).filter(t => {
+                const change = parseFloat(t.priceChangePercent);
+                return change >= 5 && change <= 10;
+            }));
         }, 2000);
 
         return () => { sub.close(); clearInterval(flush); };
@@ -62,7 +65,6 @@ export const useTickers = () => {
         if (tickers.length === 0) return;
         const universe = [...tickers]
             .filter(t => !BLACKLIST.includes(t.symbol))
-            .slice(0, 10)
             .map(t => t.symbol);
 
         setScanUniverse(universe);
