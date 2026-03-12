@@ -52,7 +52,7 @@ export const useTickers = () => {
                 };
             }).filter(t => {
                 const change = parseFloat(t.priceChangePercent);
-                return change >= 5 && change <= 10;
+                return change >= 2 && change <= 10;
             }));
         }, 2000);
 

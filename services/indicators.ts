@@ -7,7 +7,6 @@ function calculateEMA(data: number[], period: number): number[] {
   const ema: number[] = new Array(data.length).fill(NaN);
   if (data.length < period) return ema;
 
-  // Find first non-NaN index
   const startIndex = data.findIndex(v => !isNaN(v));
   if (startIndex < 0 || data.length - startIndex < period) return ema;
 
@@ -27,7 +26,6 @@ function calculateEMA(data: number[], period: number): number[] {
   return ema;
 }
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  Helper: MACD Histogram
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,11 +33,14 @@ function calculateMACDHistogram(closes: number[]): number[] {
   const ema12 = calculateEMA(closes, 12);
   const ema26 = calculateEMA(closes, 26);
   const macdLine = closes.map((_, i) => !isNaN(ema12[i]) && !isNaN(ema26[i]) ? ema12[i] - ema26[i] : NaN);
+
   const validStart = macdLine.findIndex(v => !isNaN(v));
   if (validStart < 0) return closes.map(() => NaN);
+
   const macdCompact = macdLine.slice(validStart);
   const signalCompact = calculateEMA(macdCompact, 9);
   const histogram = closes.map(() => NaN);
+
   for (let i = 0; i < signalCompact.length; i++) {
     const orig = validStart + i;
     if (!isNaN(signalCompact[i])) histogram[orig] = macdCompact[i] - signalCompact[i];
@@ -47,292 +48,96 @@ function calculateMACDHistogram(closes: number[]): number[] {
   return histogram;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-function calculateRSI(closes: number[], period: number = 14): number[] {
-  const rsi: number[] = new Array(closes.length).fill(NaN);
-  if (closes.length <= period) return rsi;
-
-  let avgGain = 0;
-  let avgLoss = 0;
-
-  for (let i = 1; i <= period; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff > 0) avgGain += diff;
-    else avgLoss += Math.abs(diff);
-  }
-
-  avgGain /= period;
-  avgLoss /= period;
-
-  rsi[period] = avgLoss === 0 ? 100 : 100 - (100 / (1 + (avgGain / avgLoss)));
-
-  for (let i = period + 1; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    let gain = 0;
-    let loss = 0;
-    if (diff > 0) gain = diff;
-    else loss = Math.abs(diff);
-
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-
-    if (avgLoss === 0) {
-      rsi[i] = 100;
-    } else {
-      rsi[i] = 100 - (100 / (1 + (avgGain / avgLoss)));
-    }
-  }
-
-  return rsi;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Helper: ATR (Average True Range)
-// ─────────────────────────────────────────────────────────────────────────────
-function calculateATR(candles: Candle[], period: number = 14): number[] {
-  const atr: number[] = new Array(candles.length).fill(NaN);
-  if (candles.length <= period) return atr;
-
-  const tr: number[] = new Array(candles.length).fill(0);
-  for (let i = 1; i < candles.length; i++) {
-    const high = candles[i].high;
-    const low = candles[i].low;
-    const prevClose = candles[i - 1].close;
-    tr[i] = Math.max(
-      high - low,
-      Math.abs(high - prevClose),
-      Math.abs(low - prevClose)
-    );
-  }
-
-  let sum = 0;
-  for (let i = 1; i <= period; i++) sum += tr[i];
-  atr[period] = sum / period;
-
-  for (let i = period + 1; i < candles.length; i++) {
-    atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period;
-  }
-  return atr;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Helper: VWMA (Volume Weighted Moving Average)
-// ─────────────────────────────────────────────────────────────────────────────
-function calculateVWMA(candles: Candle[], period: number = 20): number[] {
-  const vwma: number[] = new Array(candles.length).fill(NaN);
-  if (candles.length < period) return vwma;
-
-  for (let i = period - 1; i < candles.length; i++) {
-    let sumPV = 0;
-    let sumV = 0;
-    for (let j = i - period + 1; j <= i; j++) {
-      sumPV += candles[j].close * candles[j].volume;
-      sumV += candles[j].volume;
-    }
-    vwma[i] = sumV === 0 ? candles[i].close : sumPV / sumV;
-  }
-  return vwma;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Helper: ADX (Average Directional Index)
-// ─────────────────────────────────────────────────────────────────────────────
-function calculateADX(candles: Candle[], period: number = 14): { adx: number[], plusDI: number[], minusDI: number[] } {
-  const tr: number[] = new Array(candles.length).fill(0);
-  const plusDM: number[] = new Array(candles.length).fill(0);
-  const minusDM: number[] = new Array(candles.length).fill(0);
-
-  for (let i = 1; i < candles.length; i++) {
-    const high = candles[i].high;
-    const low = candles[i].low;
-    const prevHigh = candles[i - 1].high;
-    const prevLow = candles[i - 1].low;
-    const prevClose = candles[i - 1].close;
-
-    tr[i] = Math.max(
-      high - low,
-      Math.abs(high - prevClose),
-      Math.abs(low - prevClose)
-    );
-
-    const upMove = high - prevHigh;
-    const downMove = prevLow - low;
-
-    if (upMove > downMove && upMove > 0) plusDM[i] = upMove;
-    if (downMove > upMove && downMove > 0) minusDM[i] = downMove;
-  }
-
-  const smooth = (data: number[], p: number) => {
-    const res: number[] = new Array(data.length).fill(NaN);
-    let sum = 0;
-    for (let i = 1; i <= p; i++) sum += data[i];
-    res[p] = sum;
-    for (let i = p + 1; i < data.length; i++) {
-      res[i] = res[i - 1] - (res[i - 1] / p) + data[i];
-    }
-    return res;
-  };
-
-  const smoothedTR = smooth(tr, period);
-  const smoothedPlusDM = smooth(plusDM, period);
-  const smoothedMinusDM = smooth(minusDM, period);
-
-  const plusDI: number[] = new Array(candles.length).fill(NaN);
-  const minusDI: number[] = new Array(candles.length).fill(NaN);
-  const dx: number[] = new Array(candles.length).fill(NaN);
-
-  for (let i = period; i < candles.length; i++) {
-    if (smoothedTR[i] === 0) {
-      plusDI[i] = 0;
-      minusDI[i] = 0;
-      dx[i] = 0;
-    } else {
-      plusDI[i] = (smoothedPlusDM[i] / smoothedTR[i]) * 100;
-      minusDI[i] = (smoothedMinusDM[i] / smoothedTR[i]) * 100;
-      const diDiff = Math.abs(plusDI[i] - minusDI[i]);
-      const diSum = plusDI[i] + minusDI[i];
-      dx[i] = diSum === 0 ? 0 : (diDiff / diSum) * 100;
-    }
-  }
-
-  const adx: number[] = new Array(candles.length).fill(NaN);
-  let dxSum = 0;
-  let count = 0;
-  for (let i = period; i < period * 2; i++) {
-    if (!isNaN(dx[i])) { dxSum += dx[i]; count++; }
-  }
-
-  if (count > 0) {
-    adx[period * 2 - 1] = dxSum / count;
-    for (let i = period * 2; i < candles.length; i++) {
-      adx[i] = (adx[i - 1] * (period - 1) + dx[i]) / period;
-    }
-  }
-
-  return { adx, plusDI, minusDI };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Helper: Bollinger Bands
-// ─────────────────────────────────────────────────────────────────────────────
-function calculateBollingerBands(closes: number[], period: number = 20, multiplier: number = 2): { upper: number[], lower: number[], basis: number[] } {
-  const basis: number[] = new Array(closes.length).fill(NaN);
-  const upper: number[] = new Array(closes.length).fill(NaN);
-  const lower: number[] = new Array(closes.length).fill(NaN);
-
-  if (closes.length < period) return { upper, lower, basis };
-
-  for (let i = period - 1; i < closes.length; i++) {
-    let sum = 0;
-    for (let j = i - period + 1; j <= i; j++) {
-      sum += closes[j];
-    }
-    const mean = sum / period;
-    basis[i] = mean;
-
-    let varianceSum = 0;
-    for (let j = i - period + 1; j <= i; j++) {
-      varianceSum += Math.pow(closes[j] - mean, 2);
-    }
-    const stdDev = Math.sqrt(varianceSum / period);
-
-    upper[i] = mean + multiplier * stdDev;
-    lower[i] = mean - multiplier * stdDev;
-  }
-
-  return { upper, lower, basis };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  EMA 5/8 Crossover Implementation
-// ─────────────────────────────────────────────────────────────────────────────
-export function checkEMACrossover(symbol: string, candles: Candle[], timeframe: string, offset = 1): StrategyMatch | null {
+/**
+ * Detects Bullish/Bearish signals based on 2-3 impulse candles with increasing volume,
+ * validated by the MACD Histogram.
+ */
+export function detectImpulseSignal(symbol: string, candles: Candle[], timeframe: string, offset = 1): StrategyMatch | null {
   const bars = candles.length;
-  if (bars < 25) return null;
+  if (bars < 30) return null;
 
-  // We identify the confirmation candle index.
-  // offset = 1 means the last closed candle.
   const finalIdx = bars - 1 - offset;
-  if (finalIdx < 10) return null;
-  const finalPrevIdx = finalIdx - 1;
+  if (finalIdx < 5) return null;
 
   const closes = candles.map(c => c.close);
-  const currentPrice = candles[bars - 1].close;
+  const histogram = calculateMACDHistogram(closes);
+  const currentHist = histogram[finalIdx];
 
-  // Calculate EMA 5 and 8
-  const ema5 = calculateEMA(closes, 5);
-  const ema8 = calculateEMA(closes, 8);
+  const isGreen = (i: number) => candles[i].close > candles[i].open;
+  const isRed = (i: number) => candles[i].close < candles[i].open;
+  const volIncreased = (i: number) => candles[i].volume > candles[i - 1].volume;
 
-  let mode: 'BULL' | 'BEAR' | 'NONE' = 'NONE';
+  let mode: 'BULLISH' | 'BEARISH' | 'NONE' = 'NONE';
 
-  // Check for Crossover
-  // Bullish: EMA 5 crosses above EMA 8
-  if (ema5[finalIdx] > ema8[finalIdx] && ema5[finalPrevIdx] <= ema8[finalPrevIdx]) {
-    mode = 'BULL';
+  const bull2 = isGreen(finalIdx) && volIncreased(finalIdx) &&
+    isGreen(finalIdx - 1) && volIncreased(finalIdx - 1);
+
+  if (bull2 && currentHist > 0) {
+    mode = 'BULLISH';
   }
-  // Bearish: EMA 5 crosses below EMA 8
-  else if (ema5[finalIdx] < ema8[finalIdx] && ema5[finalPrevIdx] >= ema8[finalPrevIdx]) {
-    mode = 'BEAR';
+
+  const bear2 = isRed(finalIdx) && volIncreased(finalIdx) &&
+    isRed(finalIdx - 1) && volIncreased(finalIdx - 1);
+
+  if (bear2 && currentHist < 0) {
+    mode = 'BEARISH';
   }
 
   if (mode === 'NONE') return null;
 
-  // --- VALIDATIONS ---
-
-  // 1. MACD Histogram Validation
-  const macdHist = calculateMACDHistogram(closes);
-  if (mode === 'BULL') {
-    if (macdHist[finalIdx] <= 0 || macdHist[finalIdx] <= macdHist[finalPrevIdx]) return null;
-  } else {
-    if (macdHist[finalIdx] >= 0 || macdHist[finalIdx] >= macdHist[finalPrevIdx]) return null;
-  }
-
-  // 2. RSI Validation
-  const rsiArr = calculateRSI(closes, 14);
-  const currentRsi = rsiArr[finalIdx];
-  if (mode === 'BULL') {
-    if (currentRsi < 40 || currentRsi > 80) return null;
-  } else {
-    if (currentRsi > 60 || currentRsi < 20) return null;
-  }
-
-  // 3. Volume Validation (Spike above average)
-  const volumes = candles.map(c => c.volume);
-  let avgVol = 0;
-  const volPeriod = 20;
-  for (let i = Math.max(0, finalIdx - volPeriod); i <= finalIdx; i++) avgVol += volumes[i];
-  avgVol /= (volPeriod + 1);
-  if (volumes[finalIdx] < avgVol * 1.1) return null;
-
-  // 4. ADX Validation (Trend strength)
-  const adxData = calculateADX(candles, 14);
-  const currentAdx = adxData.adx[finalIdx];
-  if (!isNaN(currentAdx) && currentAdx < 18) return null;
-
-  // 5. VWMA Validation (Price relationship to volume-weighted average)
-  const vwmaArr = calculateVWMA(candles, 20);
-  if (mode === 'BULL' && closes[finalIdx] < vwmaArr[finalIdx]) return null;
-  if (mode === 'BEAR' && closes[finalIdx] > vwmaArr[finalIdx]) return null;
-
-  // 6. Bollinger Bands Validation (Confirm breakout strength)
-  const bb = calculateBollingerBands(closes, 20, 2);
-  if (mode === 'BULL' && closes[finalIdx] < bb.upper[finalIdx]) return null;
-  if (mode === 'BEAR' && closes[finalIdx] > bb.lower[finalIdx]) return null;
-
-  // --- SIGNAL GENERATION ---
-  const atrArr = calculateATR(candles, 14);
-  const atr = atrArr[finalIdx];
+  const currentPrice = candles[bars - 1].close;
+  const signalId = mode === 'BULLISH' ? 'IMPULSE_BULL' : 'IMPULSE_BEAR';
 
   return {
     symbol,
     price: currentPrice,
     timeframe,
-    type: mode === 'BULL' ? 'BULLISH' : 'BEARISH',
-    signal: mode === 'BULL' ? 'EMA_CROSS_BULL' : 'EMA_CROSS_BEAR',
+    type: mode,
+    signal: signalId,
     timestamp: candles[finalIdx].time,
     entryPrice: closes[finalIdx],
-    stopLoss: mode === 'BULL' ? currentPrice - (atr * 1.5) : currentPrice + (atr * 1.5),
-    takeProfit: mode === 'BULL' ? currentPrice + (atr * 3.75) : currentPrice - (atr * 3.75),
+    stopLoss: mode === 'BULLISH' ? candles[finalIdx].low : candles[finalIdx].high,
+    takeProfit: mode === 'BULLISH' ? currentPrice * 1.02 : currentPrice * 0.98,
   };
 }
 
+/**
+ * Detects Parabolic Volume signals where volume is significantly higher (3.5x+) 
+ * than the average of the previous 20 candles.
+ */
+export function detectParabolicSignal(symbol: string, candles: Candle[], timeframe: string, offset = 1): StrategyMatch | null {
+  const bars = candles.length;
+  const period = 20;
+  if (bars < period + 2) return null;
+
+  const finalIdx = bars - 1 - offset;
+  if (finalIdx < period) return null;
+
+  // Calculate average volume of previous 20 candles (excluding current)
+  let sumVol = 0;
+  for (let i = finalIdx - period; i < finalIdx; i++) {
+    sumVol += candles[i].volume;
+  }
+  const avgVol = sumVol / period;
+  const currentVol = candles[finalIdx].volume;
+
+  // Check if current volume is at least 3.5x the average
+  const isParabolic = currentVol > avgVol * 3.5;
+  if (!isParabolic) return null;
+
+  const isGreen = candles[finalIdx].close > candles[finalIdx].open;
+  const mode: 'BULLISH' | 'BEARISH' = isGreen ? 'BULLISH' : 'BEARISH';
+  const signalId = isGreen ? 'PARABOLIC_BULL' : 'PARABOLIC_BEAR';
+
+  return {
+    symbol,
+    price: candles[bars - 1].close,
+    timeframe,
+    type: mode,
+    signal: signalId,
+    timestamp: candles[finalIdx].time,
+    entryPrice: candles[finalIdx].close,
+    stopLoss: isGreen ? candles[finalIdx].low : candles[finalIdx].high,
+    takeProfit: isGreen ? candles[finalIdx].close * 1.05 : candles[finalIdx].close * 0.95,
+  };
+}

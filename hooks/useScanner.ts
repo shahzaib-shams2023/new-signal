@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StrategyMatch, Candle } from '../types';
 import { fetchKlinesBatch, getRateLimitStatus } from '../services/binanceService';
-import { checkEMACrossover } from '../services/indicators';
+import { detectImpulseSignal, detectParabolicSignal } from '../services/indicators';
 
 export const useScanner = (scanUniverse: string[]) => {
     const [bull1m, setBull1m] = useState<StrategyMatch[]>([]);
@@ -95,13 +95,20 @@ export const useScanner = (scanUniverse: string[]) => {
                 // Process results for this timeframe
                 batch.forEach(symbol => {
                     const candles = batchData[symbol] || [];
-                    if (candles.length < 20) return;
+                    if (candles.length < 25) return;
 
-                    // Check both last closed (1) and one before (2) so nothing is 'missed' if scanning is delayed
-                    const cross1 = checkEMACrossover(symbol, candles, tf, 1);
-                    const cross2 = checkEMACrossover(symbol, candles, tf, 2);
+                    // Impulse check
+                    const imp1 = detectImpulseSignal(symbol, candles, tf, 1);
+                    const imp2 = detectImpulseSignal(symbol, candles, tf, 2);
+                    const impulseMatch = imp1 || imp2;
 
-                    const finalMatch = cross1 || cross2;
+                    // Parabolic check
+                    const para1 = detectParabolicSignal(symbol, candles, tf, 1);
+                    const para2 = detectParabolicSignal(symbol, candles, tf, 2);
+                    const parabolicMatch = para1 || para2;
+
+                    // Final match logic
+                    const finalMatch = impulseMatch || parabolicMatch;
 
                     // Map setter based on TF
                     let setterBull: any, setterBear: any;
@@ -112,8 +119,8 @@ export const useScanner = (scanUniverse: string[]) => {
                     else if (tf === '1h') { setterBull = setBull1h; setterBear = setBear1h; }
                     else if (tf === '4h') { setterBull = setBull4h; setterBear = setBear4h; }
 
-                    updateMatchesStably(setterBull, finalMatch?.signal === 'EMA_CROSS_BULL' ? finalMatch : null, symbol, 'EMA_CROSS_BULL');
-                    updateMatchesStably(setterBear, finalMatch?.signal === 'EMA_CROSS_BEAR' ? finalMatch : null, symbol, 'EMA_CROSS_BEAR');
+                    updateMatchesStably(setterBull, finalMatch?.type === 'BULLISH' ? finalMatch : null, symbol, finalMatch?.signal || '');
+                    updateMatchesStably(setterBear, finalMatch?.type === 'BEARISH' ? finalMatch : null, symbol, finalMatch?.signal || '');
                 });
             }));
 
