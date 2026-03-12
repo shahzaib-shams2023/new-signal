@@ -103,9 +103,9 @@ export const useScanner = (scanUniverse: string[]) => {
                     const candles = batchData[symbol] || [];
                     if (candles.length < 25) return;
 
-                    // Check for both Impulse and Parabolic signals
-                    const impulseMatch = detectImpulseSignal(symbol, candles, tf, 1) || detectImpulseSignal(symbol, candles, tf, 2);
-                    const parabolicMatch = detectParabolicSignal(symbol, candles, tf, 1) || detectParabolicSignal(symbol, candles, tf, 2);
+                    // Check for both Impulse and Parabolic signals on the most recent closed candle (offset 1)
+                    const impulseMatch = detectImpulseSignal(symbol, candles, tf, 1);
+                    const parabolicMatch = detectParabolicSignal(symbol, candles, tf, 1);
 
                     const finalMatch = impulseMatch || parabolicMatch;
 
