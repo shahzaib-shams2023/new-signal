@@ -31,24 +31,30 @@ export const useScanner = (scanUniverse: string[]) => {
 
     const updateMatchesStably = (
         setter: React.Dispatch<React.SetStateAction<StrategyMatch[]>>,
-        match: StrategyMatch | null,
-        symbol: string,
-        signalId: string
+        match: StrategyMatch,
+        symbol: string
     ) => {
         setter(prev => {
-            if (!match) return prev; // Do not remove existing active trades when live entry conditions close out
-
-            const existingIdx = prev.findIndex(m => m.symbol === symbol && m.signal === signalId && m.timestamp === match.timestamp);
+            const existingIdx = prev.findIndex(m => m.symbol === symbol);
 
             if (existingIdx === -1) {
-                // New signal generated on a new candle
+                // New coin, new signal
                 return [match, ...prev].slice(0, 100);
             } else {
-                // Update live price for the current active signal on the current candle
-                if (prev[existingIdx].price === match.price) return prev;
-                const updated = [...prev];
-                updated[existingIdx] = match;
-                return updated;
+                // Same coin. Check if this is a newer candle or just a price update.
+                if (match.timestamp > prev[existingIdx].timestamp) {
+                    // Newer candle: replace and move to top
+                    const filtered = prev.filter(m => m.symbol !== symbol);
+                    return [match, ...filtered].slice(0, 100);
+                } else if (match.timestamp === prev[existingIdx].timestamp) {
+                    // Same candle: update current price and return
+                    if (prev[existingIdx].price === match.price) return prev;
+                    const updated = [...prev];
+                    updated[existingIdx] = match;
+                    return updated;
+                }
+                // Older signal: ignore
+                return prev;
             }
         });
     };
@@ -97,30 +103,32 @@ export const useScanner = (scanUniverse: string[]) => {
                     const candles = batchData[symbol] || [];
                     if (candles.length < 25) return;
 
-                    // Impulse check
-                    const imp1 = detectImpulseSignal(symbol, candles, tf, 1);
-                    const imp2 = detectImpulseSignal(symbol, candles, tf, 2);
-                    const impulseMatch = imp1 || imp2;
+                    // Check for both Impulse and Parabolic signals
+                    const impulseMatch = detectImpulseSignal(symbol, candles, tf, 1) || detectImpulseSignal(symbol, candles, tf, 2);
+                    const parabolicMatch = detectParabolicSignal(symbol, candles, tf, 1) || detectParabolicSignal(symbol, candles, tf, 2);
 
-                    // Parabolic check
-                    const para1 = detectParabolicSignal(symbol, candles, tf, 1);
-                    const para2 = detectParabolicSignal(symbol, candles, tf, 2);
-                    const parabolicMatch = para1 || para2;
-
-                    // Final match logic
                     const finalMatch = impulseMatch || parabolicMatch;
 
-                    // Map setter based on TF
-                    let setterBull: any, setterBear: any;
-                    if (tf === '1m') { setterBull = setBull1m; setterBear = setBear1m; }
-                    else if (tf === '5m') { setterBull = setBull5m; setterBear = setBear5m; }
-                    else if (tf === '15m') { setterBull = setBull15m; setterBear = setBear15m; }
-                    else if (tf === '30m') { setterBull = setBull30m; setterBear = setBear30m; }
-                    else if (tf === '1h') { setterBull = setBull1h; setterBear = setBear1h; }
-                    else if (tf === '4h') { setterBull = setBull4h; setterBear = setBear4h; }
+                    if (finalMatch) {
+                        // Map setter based on TF
+                        let setterBull: any, setterBear: any;
+                        if (tf === '1m') { setterBull = setBull1m; setterBear = setBear1m; }
+                        else if (tf === '5m') { setterBull = setBull5m; setterBear = setBear5m; }
+                        else if (tf === '15m') { setterBull = setBull15m; setterBear = setBear15m; }
+                        else if (tf === '30m') { setterBull = setBull30m; setterBear = setBear30m; }
+                        else if (tf === '1h') { setterBull = setBull1h; setterBear = setBear1h; }
+                        else if (tf === '4h') { setterBull = setBull4h; setterBear = setBear4h; }
 
-                    updateMatchesStably(setterBull, finalMatch?.type === 'BULLISH' ? finalMatch : null, symbol, finalMatch?.signal || '');
-                    updateMatchesStably(setterBear, finalMatch?.type === 'BEARISH' ? finalMatch : null, symbol, finalMatch?.signal || '');
+                        if (finalMatch.type === 'BULLISH') {
+                            updateMatchesStably(setterBull, finalMatch, symbol);
+                            // Ensure any stale BEAR signal for this symbol is cleared
+                            setterBear((prev: StrategyMatch[]) => prev.filter(m => m.symbol !== symbol));
+                        } else {
+                            updateMatchesStably(setterBear, finalMatch, symbol);
+                            // Ensure any stale BULL signal for this symbol is cleared
+                            setterBull((prev: StrategyMatch[]) => prev.filter(m => m.symbol !== symbol));
+                        }
+                    }
                 });
             }));
 
