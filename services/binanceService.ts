@@ -306,7 +306,7 @@ class CombinedStreamManager {
             candleCache.set(cacheKey, { candles: arr, fetchedAt: Date.now() });
           }
         } catch (_) { }
-      }, () => console.log(`📡 WS Connection ${connId} active (${chunk.length} streams)`));
+      }, () => { });
 
       this.sockets.set(connId, ws);
     }
@@ -389,8 +389,7 @@ export const fetchTickers = async (): Promise<SymbolInfo[]> => {
         .map((s: any) => s.symbol as string)
     );
 
-    // Symbols that must ALWAYS be included
-    const mustInclude = new Set(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XAUUSDT', 'XAGUSDT']);
+
 
     // 1. Map for internal logic using numeric values for sorting
     const enriched = tickers
@@ -409,13 +408,14 @@ export const fetchTickers = async (): Promise<SymbolInfo[]> => {
         numVolume: parseFloat(t.quoteVolume)
       }));
 
-    // 2. Identify coins between 5% and 10% gain
-    const gainersEnriched = [...enriched]
-      .filter((a) => a.numVolume > 10000000 && a.numChange >= 2 && a.numChange <= 10) // 5% to 10% range
-      .sort((a, b) => b.numChange - a.numChange);
+    // 2. Identify top 30 gainers with some minimum liquidity
+    const topGainers = enriched
+      .filter((a) => a.numVolume > 5000000) // Minimum 5M volume to avoid "ghost" pumps
+      .sort((a, b) => b.numChange - a.numChange)
+      .slice(0, 30);
 
     // 3. Return the filtered coins
-    return gainersEnriched.map(e => e.ticker);
+    return topGainers.map(e => e.ticker);
   } catch (error) {
     console.error('fetchTickers error:', error);
     return [];

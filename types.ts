@@ -32,7 +32,7 @@ export interface StrategyMatch {
   entryPrice?: number;
   stopLoss?: number;
   takeProfit?: number;
-  rsi?: number;
+
   status?: 'ACTIVE' | 'WIN' | 'LOSS';
   exitPrice?: number;
   exitTimestamp?: number;

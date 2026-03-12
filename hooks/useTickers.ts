@@ -50,9 +50,6 @@ export const useTickers = () => {
                     quoteVolume: u.q ?? t.quoteVolume,
                     volume: u.v ?? t.volume
                 };
-            }).filter(t => {
-                const change = parseFloat(t.priceChangePercent);
-                return change >= 2 && change <= 10;
             }));
         }, 2000);
 
@@ -69,7 +66,7 @@ export const useTickers = () => {
 
         setScanUniverse(universe);
         if (universe.length > 0) {
-            subscribeKlines(universe, ['1m', '5m', '15m', '30m', '1h', '4h']);
+            subscribeKlines(universe, ['15m', '30m', '1h', '4h']);
         }
     }, [symbolsJoined]);
 
