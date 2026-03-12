@@ -401,23 +401,14 @@ export const fetchTickers = async (): Promise<SymbolInfo[]> => {
         numVolume: parseFloat(t.quoteVolume)
       }));
 
-    // 2. Identify Top 30 Most Volatile Coins
-    const topVolatileEnriched = [...enriched]
-      .filter((a) => a.numVolume > 10000000) // Minimum 10M volume
-      .sort((a, b) => Math.abs(b.numChange) - Math.abs(a.numChange))
+    // 2. Identify Top 100 Gainers
+    const gainersEnriched = [...enriched]
+      .filter((a) => a.numVolume > 10000000 && a.numChange > 0) // Minimum 10M volume and must be a gainer
+      .sort((a, b) => b.numChange - a.numChange)
       .slice(0, 100);
-    const volatileSymbols = new Set(topVolatileEnriched.map(e => e.ticker.symbol));
 
-    // 3. Identify Majors (Must Include) that aren't already included
-    const majorsEnriched = enriched
-      .filter(e => mustInclude.has(e.ticker.symbol) && !volatileSymbols.has(e.ticker.symbol));
-    const majorSymbols = new Set(majorsEnriched.map(e => e.ticker.symbol));
-
-    // 4. Return combined list: Top Volatile -> Majors
-    return [
-      ...topVolatileEnriched,
-      ...majorsEnriched
-    ].map(e => e.ticker);
+    // 3. Return only the top 100 gainers
+    return gainersEnriched.map(e => e.ticker);
   } catch (error) {
     console.error('fetchTickers error:', error);
     return [];

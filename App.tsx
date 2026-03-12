@@ -96,7 +96,7 @@ const App: React.FC = () => {
 
   const stableSidebarAssets = useMemo(() => {
     return [...tickers].slice(0, 100);
-  }, [tickers.length > 0]); // Only update when tickers list changes significantly
+  }, [tickers]); // Update when price/list changes
 
   return (
     <div className="flex h-screen bg-[#0b0e11] text-[#eaecef] font-sans selection:bg-emerald-500 selection:text-white overflow-hidden">

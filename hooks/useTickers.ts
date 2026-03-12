@@ -19,7 +19,7 @@ export const useTickers = () => {
             setTickers(data);
         };
         load();
-        const id = setInterval(load, 10 * 60_000); // Full refresh every 10 min
+        const id = setInterval(load, 2 * 60_000); // Full refresh every 2 min
         return () => clearInterval(id);
     }, []);
 
@@ -37,12 +37,26 @@ export const useTickers = () => {
 
             setTickers(prev => prev.map(t => {
                 const u = updates.get(t.symbol);
-                return u ? { ...t, price: u.c, quoteVolume: u.q ?? t.quoteVolume, volume: u.v ?? t.volume } : t;
-            }));
+                if (!u) return t;
+
+                const open = parseFloat(u.o);
+                const close = parseFloat(u.c);
+                const change = open > 0 ? ((close - open) / open) * 100 : parseFloat(t.priceChangePercent);
+
+                return {
+                    ...t,
+                    price: u.c,
+                    priceChangePercent: change.toFixed(2),
+                    quoteVolume: u.q ?? t.quoteVolume,
+                    volume: u.v ?? t.volume
+                };
+            }).filter(t => parseFloat(t.priceChangePercent) > 0));
         }, 2000);
 
         return () => { sub.close(); clearInterval(flush); };
     }, [tickers.length > 0]);
+
+    const symbolsJoined = useMemo(() => tickers.map(t => t.symbol).sort().join(','), [tickers]);
 
     useEffect(() => {
         if (tickers.length === 0) return;
@@ -55,7 +69,7 @@ export const useTickers = () => {
         if (universe.length > 0) {
             subscribeKlines(universe, ['1m', '5m', '15m', '30m', '1h', '4h']);
         }
-    }, [tickers.length]);
+    }, [symbolsJoined]);
 
     return { tickers, scanUniverse, tickerMap };
 };
