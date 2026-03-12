@@ -101,7 +101,9 @@ export const SignalCard = React.memo<SignalCardProps>(({ match, ticker, compact 
                             <div key={i} className={`w-1 h-3 rounded-full ${isBull ? 'bg-emerald-500/30' : 'bg-rose-500/30'} ${i === 1 ? 'h-4' : ''}`} />
                         ))}
                     </div>
-                    <span className="text-[9px] font-black text-gray-600 tracking-[0.2em] uppercase">High Volume Confirmed</span>
+                    <span className="text-[9px] font-black text-gray-600 tracking-[0.2em] uppercase">
+                        {match.fvg ? `FVG ZONE: ${formatPrice(match.fvg.lower)} - ${formatPrice(match.fvg.upper)}` : 'High Volume Confirmed'}
+                    </span>
                 </div>
             </div>
         </div>

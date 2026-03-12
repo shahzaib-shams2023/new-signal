@@ -18,6 +18,14 @@ export interface SymbolInfo {
   lowPrice: string;
 }
 
+export interface FVG {
+  type: 'BULLISH' | 'BEARISH';
+  upper: number;
+  lower: number;
+  timestamp: number;
+  mitigated: boolean;
+}
+
 export interface StrategyMatch {
   symbol: string;
   price: number;
@@ -25,11 +33,15 @@ export interface StrategyMatch {
   type: 'BULLISH' | 'BEARISH';
   signal:
   | 'IMPULSE_BULL'
-  | 'IMPULSE_BEAR';
+  | 'IMPULSE_BEAR'
+  | 'FVG_BULL'
+  | 'FVG_BEAR';
   timestamp: number;
   entryPrice?: number;
   stopLoss?: number;
   takeProfit?: number;
+
+  fvg?: FVG;
 
   status?: 'ACTIVE' | 'WIN' | 'LOSS';
   exitPrice?: number;
