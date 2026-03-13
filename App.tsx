@@ -12,7 +12,7 @@ import { formatPrice } from './utils/formatters';
 const App: React.FC = () => {
   const { tickers, scanUniverse, tickerMap } = useTickers();
   const {
-    bull1m, bear1m, bull5m, bear5m,
+    bull1m, bear1m,
     totalScanned, scanStatus, weightInfo
   } = useScanner(scanUniverse);
 
@@ -23,18 +23,16 @@ const App: React.FC = () => {
   const allSignals = useMemo(() => {
     const now = Date.now();
     const signals = [
-      ...bull1m, ...bear1m,
-      ...bull5m, ...bear5m
+      ...bull1m, ...bear1m
     ];
     return signals
       .filter(s => {
         const ageMs = now - s.timestamp;
         // Age filtering based on timeframe
-        if (s.timeframe === '5m') return ageMs < 60 * 60 * 1000; // 1h for 5m
         return ageMs < 30 * 60 * 1000; // 30m for 1m
       })
       .sort((a, b) => b.timestamp - a.timestamp);
-  }, [bull1m, bear1m, bull5m, bear5m]);
+  }, [bull1m, bear1m]);
 
   const activeSignalMap = useMemo(() => {
     const map = new Map<string, StrategyMatch>();
@@ -181,11 +179,6 @@ const App: React.FC = () => {
                     <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-4">Trend Matrix (1m)</h3>
                     <CollapsibleSection title="High Conviction Bullish" timeframe="1m" matches={bull1m} tickerMap={tickerMap} color="emerald" />
                     <CollapsibleSection title="Strategic Exit & Short" timeframe="1m" matches={bear1m} tickerMap={tickerMap} color="rose" />
-                  </div>
-                  <div className="space-y-6">
-                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-4">Trend Matrix (5m)</h3>
-                    <CollapsibleSection title="High Conviction Bullish" timeframe="5m" matches={bull5m} tickerMap={tickerMap} color="emerald" />
-                    <CollapsibleSection title="Strategic Exit & Short" timeframe="5m" matches={bear5m} tickerMap={tickerMap} color="rose" />
                   </div>
                 </div>
               </div>

@@ -6,8 +6,6 @@ import { detectImpulseSignal } from '../services/indicators';
 export const useScanner = (scanUniverse: string[]) => {
     const [bull1m, setBull1m] = useState<StrategyMatch[]>([]);
     const [bear1m, setBear1m] = useState<StrategyMatch[]>([]);
-    const [bull5m, setBull5m] = useState<StrategyMatch[]>([]);
-    const [bear5m, setBear5m] = useState<StrategyMatch[]>([]);
     const [totalScanned, setTotalScanned] = useState(0);
     const [scanStatus, setScanStatus] = useState<string>('Initializing…');
     const [weightInfo, setWeightInfo] = useState({ used: 0, pct: 0 });
@@ -82,13 +80,13 @@ export const useScanner = (scanUniverse: string[]) => {
             }
 
             // Proactively subscribe to WebSockets for this batch to keep cache warm (0 weight REST calls)
-            subscribeKlines(batch, ['1m', '5m']);
+            subscribeKlines(batch, ['1m']);
 
             // Display up to 3 coins to prevent the UI from looking stuck on just 1
             setScanStatus(batch.slice(0, 3).join(', ') + '…');
 
             // Parallelize scanning of multiple timeframes across the whole batch
-            const tfs = ['1m', '5m'];
+            const tfs = ['1m'];
             await Promise.all(tfs.map(async (tf) => {
                 const batchData = await fetchKlinesBatch(batch, tf, 120);
 
@@ -105,7 +103,6 @@ export const useScanner = (scanUniverse: string[]) => {
                         // Map setter based on TF
                         let setterBull: any, setterBear: any;
                         if (tf === '1m') { setterBull = setBull1m; setterBear = setBear1m; }
-                        else if (tf === '5m') { setterBull = setBull5m; setterBear = setBear5m; }
 
                         if (finalMatch.type === 'BULLISH') {
                             updateMatchesStably(setterBull, finalMatch, symbol);
@@ -132,7 +129,7 @@ export const useScanner = (scanUniverse: string[]) => {
     }, [scanUniverse.length > 0]);
 
     return {
-        bull1m, bear1m, bull5m, bear5m,
+        bull1m, bear1m,
         totalScanned, scanStatus, weightInfo
     };
 };

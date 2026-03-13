@@ -39,6 +39,19 @@ function calculateMACDHistogram(closes: number[]): number[] {
   return histogram;
 }
 
+function calculateVWAP(candles: Candle[]): number[] {
+  const vwap = new Array(candles.length).fill(0);
+  let cumulativeTPV = 0;
+  let cumulativeVolume = 0;
+  for (let i = 0; i < candles.length; i++) {
+    const typicalPrice = (candles[i].high + candles[i].low + candles[i].close) / 3;
+    cumulativeTPV += typicalPrice * candles[i].volume;
+    cumulativeVolume += candles[i].volume;
+    vwap[i] = cumulativeVolume === 0 ? typicalPrice : cumulativeTPV / cumulativeVolume;
+  }
+  return vwap;
+}
+
 export function detectImpulseSignal(symbol: string, candles: Candle[], timeframe: string, offset = 1): StrategyMatch | null {
   const bars = candles.length;
   // Sequence needs: 2-3 Impulse + 1 Pullback + 1 Confirm = 4-5 candles.
@@ -54,10 +67,13 @@ export function detectImpulseSignal(symbol: string, candles: Candle[], timeframe
   const macdHistArray = calculateMACDHistogram(closes);
   const currentMacdHist = macdHistArray[finalIdx];
 
+  const vwapArray = calculateVWAP(candles);
+  const currentVWAP = vwapArray[finalIdx];
+
   // BULLISH Logic
   if (isGreen(finalIdx) && isRed(finalIdx - 1)) {
-    // Bullish signal will only be generated when MACD Histogram is positive
-    if (currentMacdHist > 0) {
+    // Bullish signal will only be generated when MACD Histogram is positive and price is above VWAP
+    if (currentMacdHist > 0 && candles[finalIdx].close > currentVWAP) {
       const confirmG = candles[finalIdx];
       const pullbackR = candles[finalIdx - 1];
 
@@ -91,8 +107,8 @@ export function detectImpulseSignal(symbol: string, candles: Candle[], timeframe
 
   // BEARISH Logic
   if (isRed(finalIdx) && isGreen(finalIdx - 1)) {
-    // Bearish signal MACD validation (negative MACD hist)
-    if (currentMacdHist < 0) {
+    // Bearish signal MACD validation (negative MACD hist) and price is below VWAP
+    if (currentMacdHist < 0 && candles[finalIdx].close < currentVWAP) {
       const confirmR = candles[finalIdx];
       const pullbackG = candles[finalIdx - 1];
 
