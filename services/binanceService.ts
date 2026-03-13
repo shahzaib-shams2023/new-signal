@@ -408,11 +408,11 @@ export const fetchTickers = async (): Promise<SymbolInfo[]> => {
         numVolume: parseFloat(t.quoteVolume)
       }));
 
-    // 2. Identify top 30 gainers with some minimum liquidity
+    // 2. Identify top 50 gainers with some minimum liquidity
     const topGainers = enriched
       .filter((a) => a.numVolume > 5000000) // Minimum 5M volume to avoid "ghost" pumps
       .sort((a, b) => b.numChange - a.numChange)
-      .slice(0, 30);
+      .slice(0, 50);
 
     // 3. Return the filtered coins
     return topGainers.map(e => e.ticker);
