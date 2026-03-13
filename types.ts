@@ -24,8 +24,8 @@ export interface StrategyMatch {
   timeframe: string;
   type: 'BULLISH' | 'BEARISH';
   signal:
-  | 'IMPULSE_BULL'
-  | 'IMPULSE_BEAR';
+  | 'SCALP_LONG'
+  | 'SCALP_SHORT';
   timestamp: number;
   entryPrice?: number;
   stopLoss?: number;

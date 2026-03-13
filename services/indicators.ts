@@ -1,8 +1,6 @@
 import { Candle, StrategyMatch } from '../types';
 
-
-//  Helper: MACD
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── EMA ────────────────────────────────────────────────────────────────────────
 function calculateEMA(data: number[], period: number): number[] {
   const k = 2 / (period + 1);
   const ema = new Array(data.length).fill(0);
@@ -11,7 +9,7 @@ function calculateEMA(data: number[], period: number): number[] {
   let sum = 0;
   for (let i = 0; i < period && i < data.length; i++) {
     sum += data[i];
-    ema[i] = sum / (i + 1); // SMA for the initial period
+    ema[i] = sum / (i + 1);
   }
 
   for (let i = period; i < data.length; i++) {
@@ -20,6 +18,40 @@ function calculateEMA(data: number[], period: number): number[] {
   return ema;
 }
 
+// ─── RSI ────────────────────────────────────────────────────────────────────────
+function calculateRSI(closes: number[], period: number): number[] {
+  const rsi = new Array(closes.length).fill(50);
+  if (closes.length < period + 1) return rsi;
+
+  let avgGain = 0;
+  let avgLoss = 0;
+
+  // Seed with SMA of first `period` changes
+  for (let i = 1; i <= period; i++) {
+    const delta = closes[i] - closes[i - 1];
+    if (delta > 0) avgGain += delta;
+    else avgLoss += Math.abs(delta);
+  }
+  avgGain /= period;
+  avgLoss /= period;
+
+  rsi[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+
+  // Smoothed (Wilder) for the rest
+  for (let i = period + 1; i < closes.length; i++) {
+    const delta = closes[i] - closes[i - 1];
+    const gain = delta > 0 ? delta : 0;
+    const loss = delta < 0 ? Math.abs(delta) : 0;
+
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+
+    rsi[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  }
+  return rsi;
+}
+
+// ─── MACD Histogram ─────────────────────────────────────────────────────────────
 function calculateMACDHistogram(closes: number[]): number[] {
   const fastEMA = calculateEMA(closes, 12);
   const slowEMA = calculateEMA(closes, 26);
@@ -35,126 +67,138 @@ function calculateMACDHistogram(closes: number[]): number[] {
   for (let i = 0; i < closes.length; i++) {
     histogram[i] = macdLine[i] - signalLine[i];
   }
-
   return histogram;
 }
 
+// ─── VWAP ───────────────────────────────────────────────────────────────────────
 function calculateVWAP(candles: Candle[]): number[] {
   const vwap = new Array(candles.length).fill(0);
   let cumulativeTPV = 0;
   let cumulativeVolume = 0;
   for (let i = 0; i < candles.length; i++) {
-    const typicalPrice = (candles[i].high + candles[i].low + candles[i].close) / 3;
-    cumulativeTPV += typicalPrice * candles[i].volume;
+    const tp = (candles[i].high + candles[i].low + candles[i].close) / 3;
+    cumulativeTPV += tp * candles[i].volume;
     cumulativeVolume += candles[i].volume;
-    vwap[i] = cumulativeVolume === 0 ? typicalPrice : cumulativeTPV / cumulativeVolume;
+    vwap[i] = cumulativeVolume === 0 ? tp : cumulativeTPV / cumulativeVolume;
   }
   return vwap;
 }
 
-export function detectImpulseSignal(symbol: string, candles: Candle[], timeframe: string, offset = 1): StrategyMatch | null {
+// ─── Volume SMA ─────────────────────────────────────────────────────────────────
+function volumeSMA(candles: Candle[], period: number, idx: number): number {
+  const start = Math.max(0, idx - period + 1);
+  let sum = 0;
+  let count = 0;
+  for (let i = start; i <= idx; i++) {
+    sum += candles[i].volume;
+    count++;
+  }
+  return count === 0 ? 0 : sum / count;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN: Multi-Confluence 1m Scalp Detector
+// ═══════════════════════════════════════════════════════════════════════════════
+export function detectImpulseSignal(
+  symbol: string,
+  candles: Candle[],
+  timeframe: string,
+  offset = 1
+): StrategyMatch | null {
   const bars = candles.length;
-  // Sequence needs: 2-3 Impulse + 1 Pullback + 1 Confirm = 4-5 candles.
-  if (bars < 35) return null;
+  // Need at least 55 bars for EMA 50 + a few bars of look-back
+  if (bars < 55) return null;
 
-  const finalIdx = bars - 1 - offset; // The Confirmation Candle (must be closed)
-  if (finalIdx < 6) return null;
-
-  const isGreen = (i: number) => candles[i].close > candles[i].open;
-  const isRed = (i: number) => candles[i].close < candles[i].open;
+  const idx = bars - 1 - offset; // Most recent CLOSED candle
+  if (idx < 50) return null;
 
   const closes = candles.map(c => c.close);
-  const macdHistArray = calculateMACDHistogram(closes);
-  const currentMacdHist = macdHistArray[finalIdx];
 
-  const vwapArray = calculateVWAP(candles);
-  const currentVWAP = vwapArray[finalIdx];
+  // ── Compute all indicators ──────────────────────────────────────────────────
+  const ema9 = calculateEMA(closes, 9);
+  const ema21 = calculateEMA(closes, 21);
+  const ema50 = calculateEMA(closes, 50);
+  const rsi = calculateRSI(closes, 7);
+  const macdHist = calculateMACDHistogram(closes);
+  const vwap = calculateVWAP(candles);
 
-  // BULLISH Logic
-  if (isGreen(finalIdx) && isRed(finalIdx - 1)) {
-    // Bullish signal will only be generated when MACD Histogram is positive and price is above VWAP
-    if (currentMacdHist > 0 && candles[finalIdx].close > currentVWAP) {
-      const confirmG = candles[finalIdx];
-      const pullbackR = candles[finalIdx - 1];
+  const price = candles[idx].close;
+  const vol = candles[idx].volume;
+  const avgVol = volumeSMA(candles, 20, idx - 1); // Avg of prior 20 candles
 
-      if (confirmG.close > pullbackR.high) {
-        // Check for 3-candle impulse (V3 > V2 > V1)
-        if (finalIdx - 4 >= 0 &&
-          isGreen(finalIdx - 2) && isGreen(finalIdx - 3) && isGreen(finalIdx - 4) &&
-          candles[finalIdx - 2].volume > candles[finalIdx - 3].volume &&
-          candles[finalIdx - 3].volume > candles[finalIdx - 4].volume
-        ) {
-          const impulseLows = [candles[finalIdx - 2].low, candles[finalIdx - 3].low, candles[finalIdx - 4].low];
-          const minL = Math.min(...impulseLows);
-          if (pullbackR.low >= minL) {
-            return createMatch('BULLISH', 'IMPULSE_BULL', finalIdx);
-          }
-        }
-        // Check for 2-candle impulse (V2 > V1)
-        else if (finalIdx - 3 >= 0 &&
-          isGreen(finalIdx - 2) && isGreen(finalIdx - 3) &&
-          candles[finalIdx - 2].volume > candles[finalIdx - 3].volume
-        ) {
-          const impulseLows = [candles[finalIdx - 2].low, candles[finalIdx - 3].low];
-          const minL = Math.min(...impulseLows);
-          if (pullbackR.low >= minL) {
-            return createMatch('BULLISH', 'IMPULSE_BULL', finalIdx);
-          }
-        }
-      }
+  // ── 1. EMA 9/21 Crossover (must happen on THIS candle) ──────────────────────
+  const ema9CrossAbove = ema9[idx] > ema21[idx] && ema9[idx - 1] <= ema21[idx - 1];
+  const ema9CrossBelow = ema9[idx] < ema21[idx] && ema9[idx - 1] >= ema21[idx - 1];
+
+  // ── 2. Trend filter ─────────────────────────────────────────────────────────
+  const aboveEma50 = price > ema50[idx];
+  const belowEma50 = price < ema50[idx];
+
+  // ── 3. VWAP bias ────────────────────────────────────────────────────────────
+  const aboveVwap = price > vwap[idx];
+  const belowVwap = price < vwap[idx];
+
+  // ── 4. RSI zone ─────────────────────────────────────────────────────────────
+  const rsiVal = rsi[idx];
+  const rsiBullZone = rsiVal >= 40 && rsiVal <= 70;
+  const rsiBearZone = rsiVal >= 30 && rsiVal <= 60;
+
+  // ── 5. MACD histogram ──────────────────────────────────────────────────────
+  const macdBull = macdHist[idx] > 0;
+  const macdBear = macdHist[idx] < 0;
+
+  // ── 6. Volume confirmation ─────────────────────────────────────────────────
+  const volSpike = avgVol > 0 && vol >= 1.5 * avgVol;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LONG Signal: All 6 confluences must align
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (ema9CrossAbove && aboveEma50 && aboveVwap && rsiBullZone && macdBull && volSpike) {
+    // Stop Loss = lowest low of last 5 candles
+    let swingLow = Infinity;
+    for (let i = idx; i > idx - 5 && i >= 0; i--) {
+      if (candles[i].low < swingLow) swingLow = candles[i].low;
     }
+    const risk = price - swingLow;
+    const tp = price + risk * 2; // 2:1 R:R
+
+    return {
+      symbol,
+      price: candles[bars - 1].close,
+      timeframe,
+      type: 'BULLISH',
+      signal: 'SCALP_LONG',
+      timestamp: candles[idx].time,
+      entryPrice: price,
+      stopLoss: swingLow,
+      takeProfit: tp,
+    };
   }
 
-  // BEARISH Logic
-  if (isRed(finalIdx) && isGreen(finalIdx - 1)) {
-    // Bearish signal MACD validation (negative MACD hist) and price is below VWAP
-    if (currentMacdHist < 0 && candles[finalIdx].close < currentVWAP) {
-      const confirmR = candles[finalIdx];
-      const pullbackG = candles[finalIdx - 1];
-
-      if (confirmR.close < pullbackG.low) {
-        // Check for 3-candle impulse (V3 > V2 > V1)
-        if (finalIdx - 4 >= 0 &&
-          isRed(finalIdx - 2) && isRed(finalIdx - 3) && isRed(finalIdx - 4) &&
-          candles[finalIdx - 2].volume > candles[finalIdx - 3].volume &&
-          candles[finalIdx - 3].volume > candles[finalIdx - 4].volume
-        ) {
-          const impulseHighs = [candles[finalIdx - 2].high, candles[finalIdx - 3].high, candles[finalIdx - 4].high];
-          const maxH = Math.max(...impulseHighs);
-          if (pullbackG.high <= maxH) {
-            return createMatch('BEARISH', 'IMPULSE_BEAR', finalIdx);
-          }
-        }
-        // Check for 2-candle impulse (V2 > V1)
-        else if (finalIdx - 3 >= 0 &&
-          isRed(finalIdx - 2) && isRed(finalIdx - 3) &&
-          candles[finalIdx - 2].volume > candles[finalIdx - 3].volume
-        ) {
-          const impulseHighs = [candles[finalIdx - 2].high, candles[finalIdx - 3].high];
-          const maxH = Math.max(...impulseHighs);
-          if (pullbackG.high <= maxH) {
-            return createMatch('BEARISH', 'IMPULSE_BEAR', finalIdx);
-          }
-        }
-      }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SHORT Signal: All 6 confluences must align
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (ema9CrossBelow && belowEma50 && belowVwap && rsiBearZone && macdBear && volSpike) {
+    // Stop Loss = highest high of last 5 candles
+    let swingHigh = -Infinity;
+    for (let i = idx; i > idx - 5 && i >= 0; i--) {
+      if (candles[i].high > swingHigh) swingHigh = candles[i].high;
     }
+    const risk = swingHigh - price;
+    const tp = price - risk * 2; // 2:1 R:R
+
+    return {
+      symbol,
+      price: candles[bars - 1].close,
+      timeframe,
+      type: 'BEARISH',
+      signal: 'SCALP_SHORT',
+      timestamp: candles[idx].time,
+      entryPrice: price,
+      stopLoss: swingHigh,
+      takeProfit: tp,
+    };
   }
 
   return null;
-
-  function createMatch(type: 'BULLISH' | 'BEARISH', signal: string, idx: number): StrategyMatch {
-    const currentPrice = candles[bars - 1].close;
-    return {
-      symbol,
-      price: currentPrice,
-      timeframe,
-      type,
-      signal: signal as any,
-      timestamp: candles[idx].time,
-      entryPrice: candles[idx].close,
-      stopLoss: type === 'BULLISH' ? candles[idx].low : candles[idx].high,
-      takeProfit: type === 'BULLISH' ? currentPrice * 1.02 : currentPrice * 0.98,
-    };
-  }
 }
-

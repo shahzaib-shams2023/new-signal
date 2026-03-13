@@ -7,11 +7,11 @@ interface SignalBadgeProps {
 }
 
 export const SignalBadge: React.FC<SignalBadgeProps> = ({ signal }) => {
-    const isBull = signal.includes('BULL');
+    const isBull = signal.includes('LONG');
     let label = 'UNKNOWN';
 
-    if (signal === 'IMPULSE_BULL') label = '🚀 BULL IMPULSE';
-    else if (signal === 'IMPULSE_BEAR') label = '🔥 BEAR IMPULSE';
+    if (signal === 'SCALP_LONG') label = '🚀 SCALP LONG';
+    else if (signal === 'SCALP_SHORT') label = '🔥 SCALP SHORT';
     else label = `📡 ${signal.replace(/_/g, ' ')}`;
 
     return (
