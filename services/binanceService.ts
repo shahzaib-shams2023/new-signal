@@ -55,7 +55,7 @@ interface QueuedTask {
 }
 
 const queue: QueuedTask[] = [];
-const MAX_CONCURRENT = 5;
+const MAX_CONCURRENT = 10;
 let activeRequests = 0;
 let isProcessing = false;
 
@@ -407,14 +407,15 @@ export const fetchTickers = async (): Promise<SymbolInfo[]> => {
         numVolume: parseFloat(t.quoteVolume)
       }));
 
-    // 2. Identify top 50 gainers with some minimum liquidity
-    const topGainers = enriched
-      .filter((a) => a.numVolume > 5000000) // Minimum 5M volume to avoid "ghost" pumps
-      .sort((a, b) => b.numChange - a.numChange)
-      .slice(0, 50);
+    // 2. Include ALL liquid coins (>$1M daily volume) sorted by volume
+    //    This ensures we scan the full universe for high-probability setups
+    //    rather than only coins that are already pumping.
+    const liquidCoins = enriched
+      .filter((a) => a.numVolume > 1_000_000) // $1M min to filter dead/illiquid pairs
+      .sort((a, b) => b.numVolume - a.numVolume); // Highest volume first = most liquid = tightest spreads
 
-    // 3. Return the filtered coins
-    return topGainers.map(e => e.ticker);
+    // 3. Return ALL liquid coins
+    return liquidCoins.map(e => e.ticker);
   } catch (error) {
     console.error('fetchTickers error:', error);
     return [];
