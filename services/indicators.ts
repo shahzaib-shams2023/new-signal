@@ -133,8 +133,8 @@ export function detectImpulseSignal(symbol: string, candles: Candle[], timeframe
 
   // BEARISH Logic
   if (isRed(finalIdx) && isGreen(finalIdx - 1)) {
-    // Bearish signal MACD validation (negative MACD hist)
-    if (currentMacdHist < 0) {
+    // Bearish signal MACD validation (negative MACD hist) and RSI between 50 - 100
+    if (currentRsi >= 40 && currentRsi <= 100 && currentMacdHist < 0) {
       const confirmR = candles[finalIdx];
       const pullbackG = candles[finalIdx - 1];
 
