@@ -4,14 +4,10 @@ import { fetchKlinesBatch, getRateLimitStatus, subscribeKlines } from '../servic
 import { detectImpulseSignal } from '../services/indicators';
 
 export const useScanner = (scanUniverse: string[]) => {
-    const [bull15m, setBull15m] = useState<StrategyMatch[]>([]);
-    const [bear15m, setBear15m] = useState<StrategyMatch[]>([]);
-    const [bull30m, setBull30m] = useState<StrategyMatch[]>([]);
-    const [bear30m, setBear30m] = useState<StrategyMatch[]>([]);
-    const [bull1h, setBull1h] = useState<StrategyMatch[]>([]);
-    const [bear1h, setBear1h] = useState<StrategyMatch[]>([]);
-    const [bull4h, setBull4h] = useState<StrategyMatch[]>([]);
-    const [bear4h, setBear4h] = useState<StrategyMatch[]>([]);
+    const [bull1m, setBull1m] = useState<StrategyMatch[]>([]);
+    const [bear1m, setBear1m] = useState<StrategyMatch[]>([]);
+    const [bull5m, setBull5m] = useState<StrategyMatch[]>([]);
+    const [bear5m, setBear5m] = useState<StrategyMatch[]>([]);
     const [totalScanned, setTotalScanned] = useState(0);
     const [scanStatus, setScanStatus] = useState<string>('Initializing…');
     const [weightInfo, setWeightInfo] = useState({ used: 0, pct: 0 });
@@ -86,13 +82,13 @@ export const useScanner = (scanUniverse: string[]) => {
             }
 
             // Proactively subscribe to WebSockets for this batch to keep cache warm (0 weight REST calls)
-            subscribeKlines(batch, ['15m', '30m', '1h', '4h']);
+            subscribeKlines(batch, ['1m', '5m']);
 
             // Display up to 3 coins to prevent the UI from looking stuck on just 1
             setScanStatus(batch.slice(0, 3).join(', ') + '…');
 
             // Parallelize scanning of multiple timeframes across the whole batch
-            const tfs = ['15m', '30m', '1h', '4h'];
+            const tfs = ['1m', '5m'];
             await Promise.all(tfs.map(async (tf) => {
                 const batchData = await fetchKlinesBatch(batch, tf, 120);
 
@@ -108,10 +104,8 @@ export const useScanner = (scanUniverse: string[]) => {
                     if (finalMatch) {
                         // Map setter based on TF
                         let setterBull: any, setterBear: any;
-                        if (tf === '15m') { setterBull = setBull15m; setterBear = setBear15m; }
-                        else if (tf === '30m') { setterBull = setBull30m; setterBear = setBear30m; }
-                        else if (tf === '1h') { setterBull = setBull1h; setterBear = setBear1h; }
-                        else if (tf === '4h') { setterBull = setBull4h; setterBear = setBear4h; }
+                        if (tf === '1m') { setterBull = setBull1m; setterBear = setBear1m; }
+                        else if (tf === '5m') { setterBull = setBull5m; setterBear = setBear5m; }
 
                         if (finalMatch.type === 'BULLISH') {
                             updateMatchesStably(setterBull, finalMatch, symbol);
@@ -138,8 +132,7 @@ export const useScanner = (scanUniverse: string[]) => {
     }, [scanUniverse.length > 0]);
 
     return {
-        bull15m, bear15m, bull30m, bear30m,
-        bull1h, bear1h, bull4h, bear4h,
+        bull1m, bear1m, bull5m, bear5m,
         totalScanned, scanStatus, weightInfo
     };
 };

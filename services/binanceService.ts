@@ -216,10 +216,8 @@ interface CacheEntry {
 const candleCache = new Map<string, CacheEntry>();
 
 const CANDLE_TTL: Record<string, number> = {
-  '15m': 60_000 * 14.5, // 14.5 mins
-  '30m': 60_000 * 29.5, // 29.5 mins
-  '1h': 60_000 * 59.5,  // 59.5 mins
-  '4h': 60_000 * 239.5, // 3h 59.5m
+  '1m': 60_000 * 0.9,    // 54 seconds
+  '5m': 60_000 * 4.5,    // 4.5 mins
 };
 
 function getCached(key: string, interval: string): Candle[] | null {

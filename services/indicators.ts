@@ -1,46 +1,6 @@
 import { Candle, StrategyMatch } from '../types';
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Helper: RSI
-// ─────────────────────────────────────────────────────────────────────────────
-function calculateRSI(closes: number[], period: number = 14): number[] {
-  const rsi: number[] = new Array(closes.length).fill(NaN);
-  if (closes.length < period + 1) return rsi;
 
-  let gains = 0;
-  let losses = 0;
-
-  for (let i = 1; i <= period; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff > 0) gains += diff;
-    else losses -= diff;
-  }
-
-  let avgGain = gains / period;
-  let avgLoss = losses / period;
-
-  rsi[period] = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
-
-  for (let i = period + 1; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    const gain = diff > 0 ? diff : 0;
-    const loss = diff < 0 ? -diff : 0;
-
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-
-    if (avgLoss === 0) {
-      rsi[i] = 100;
-    } else {
-      const rs = avgGain / avgLoss;
-      rsi[i] = 100 - (100 / (1 + rs));
-    }
-  }
-
-  return rsi;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 //  Helper: MACD
 // ─────────────────────────────────────────────────────────────────────────────
 function calculateEMA(data: number[], period: number): number[] {
@@ -91,15 +51,13 @@ export function detectImpulseSignal(symbol: string, candles: Candle[], timeframe
   const isRed = (i: number) => candles[i].close < candles[i].open;
 
   const closes = candles.map(c => c.close);
-  const rsiArray = calculateRSI(closes, 14);
   const macdHistArray = calculateMACDHistogram(closes);
-  const currentRsi = rsiArray[finalIdx];
   const currentMacdHist = macdHistArray[finalIdx];
 
   // BULLISH Logic
   if (isGreen(finalIdx) && isRed(finalIdx - 1)) {
-    // Bullish signal will only be generated when RSI is between 20 - 50 and MACD Histogram is positive
-    if (currentRsi >= 20 && currentRsi <= 70 && currentMacdHist > 0) {
+    // Bullish signal will only be generated when MACD Histogram is positive
+    if (currentMacdHist > 0) {
       const confirmG = candles[finalIdx];
       const pullbackR = candles[finalIdx - 1];
 
@@ -133,8 +91,8 @@ export function detectImpulseSignal(symbol: string, candles: Candle[], timeframe
 
   // BEARISH Logic
   if (isRed(finalIdx) && isGreen(finalIdx - 1)) {
-    // Bearish signal MACD validation (negative MACD hist) and RSI between 50 - 100
-    if (currentRsi >= 40 && currentRsi <= 100 && currentMacdHist < 0) {
+    // Bearish signal MACD validation (negative MACD hist)
+    if (currentMacdHist < 0) {
       const confirmR = candles[finalIdx];
       const pullbackG = candles[finalIdx - 1];
 
