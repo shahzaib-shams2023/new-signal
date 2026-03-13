@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StrategyMatch, Candle } from '../types';
 import { fetchKlinesBatch, getRateLimitStatus, subscribeKlines } from '../services/binanceService';
-import { detectImpulseSignal } from '../services/indicators';
+import { detectImpulseSignal, detectSwingSignal } from '../services/indicators';
 
 export const useScanner = (scanUniverse: string[]) => {
     const [bull1m, setBull1m] = useState<StrategyMatch[]>([]);
     const [bear1m, setBear1m] = useState<StrategyMatch[]>([]);
+    const [bull1h, setBull1h] = useState<StrategyMatch[]>([]);
+    const [bear1h, setBear1h] = useState<StrategyMatch[]>([]);
+    const [bull4h, setBull4h] = useState<StrategyMatch[]>([]);
+    const [bear4h, setBear4h] = useState<StrategyMatch[]>([]);
     const [totalScanned, setTotalScanned] = useState(0);
     const [scanStatus, setScanStatus] = useState<string>('Initializing…');
     const [weightInfo, setWeightInfo] = useState({ used: 0, pct: 0 });
@@ -80,29 +84,34 @@ export const useScanner = (scanUniverse: string[]) => {
             }
 
             // Proactively subscribe to WebSockets for this batch to keep cache warm (0 weight REST calls)
-            subscribeKlines(batch, ['1m']);
+            subscribeKlines(batch, ['1m', '1h', '4h']);
 
             // Display up to 3 coins to prevent the UI from looking stuck on just 1
             setScanStatus(batch.slice(0, 3).join(', ') + '…');
 
             // Parallelize scanning of multiple timeframes across the whole batch
-            const tfs = ['1m'];
+            const tfs = ['1m', '1h', '4h'];
             await Promise.all(tfs.map(async (tf) => {
-                const batchData = await fetchKlinesBatch(batch, tf, 120);
+                const isSwing = tf === '1h' || tf === '4h';
+                const limit = isSwing ? 250 : 120;
+                const batchData = await fetchKlinesBatch(batch, tf, limit);
 
                 // Process results for this timeframe
                 batch.forEach(symbol => {
                     const candles = batchData[symbol] || [];
-                    if (candles.length < 25) return;
+                    if (candles.length < (isSwing ? 210 : 25)) return;
 
-                    // Check for Impulse signals on the most recent closed candle (offset 1)
-                    const impulseMatch = detectImpulseSignal(symbol, candles, tf, 1);
-                    const finalMatch = impulseMatch;
+                    // Use the appropriate detector per timeframe
+                    const finalMatch = isSwing
+                        ? detectSwingSignal(symbol, candles, tf, 1)
+                        : detectImpulseSignal(symbol, candles, tf, 1);
 
                     if (finalMatch) {
                         // Map setter based on TF
                         let setterBull: any, setterBear: any;
                         if (tf === '1m') { setterBull = setBull1m; setterBear = setBear1m; }
+                        else if (tf === '1h') { setterBull = setBull1h; setterBear = setBear1h; }
+                        else if (tf === '4h') { setterBull = setBull4h; setterBear = setBear4h; }
 
                         if (finalMatch.type === 'BULLISH') {
                             updateMatchesStably(setterBull, finalMatch, symbol);
@@ -129,7 +138,7 @@ export const useScanner = (scanUniverse: string[]) => {
     }, [scanUniverse.length > 0]);
 
     return {
-        bull1m, bear1m,
+        bull1m, bear1m, bull1h, bear1h, bull4h, bear4h,
         totalScanned, scanStatus, weightInfo
     };
 };

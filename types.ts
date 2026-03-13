@@ -25,7 +25,9 @@ export interface StrategyMatch {
   type: 'BULLISH' | 'BEARISH';
   signal:
   | 'SCALP_LONG'
-  | 'SCALP_SHORT';
+  | 'SCALP_SHORT'
+  | 'SWING_LONG'
+  | 'SWING_SHORT';
   timestamp: number;
   entryPrice?: number;
   stopLoss?: number;

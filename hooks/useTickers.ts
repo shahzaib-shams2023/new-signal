@@ -66,7 +66,7 @@ export const useTickers = () => {
 
         setScanUniverse(universe);
         if (universe.length > 0) {
-            subscribeKlines(universe, ['1m']);
+            subscribeKlines(universe, ['1m', '1h', '4h']);
         }
     }, [symbolsJoined]);
 

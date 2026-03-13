@@ -12,7 +12,7 @@ import { formatPrice } from './utils/formatters';
 const App: React.FC = () => {
   const { tickers, scanUniverse, tickerMap } = useTickers();
   const {
-    bull1m, bear1m,
+    bull1m, bear1m, bull1h, bear1h, bull4h, bear4h,
     totalScanned, scanStatus, weightInfo
   } = useScanner(scanUniverse);
 
@@ -23,16 +23,20 @@ const App: React.FC = () => {
   const allSignals = useMemo(() => {
     const now = Date.now();
     const signals = [
-      ...bull1m, ...bear1m
+      ...bull1m, ...bear1m,
+      ...bull1h, ...bear1h,
+      ...bull4h, ...bear4h
     ];
     return signals
       .filter(s => {
         const ageMs = now - s.timestamp;
-        // Age filtering based on timeframe
-        return ageMs < 30 * 60 * 1000; // 30m for 1m
+        if (s.timeframe === '1m') return ageMs < 30 * 60 * 1000;   // 30m
+        if (s.timeframe === '1h') return ageMs < 4 * 60 * 60 * 1000; // 4h
+        if (s.timeframe === '4h') return ageMs < 12 * 60 * 60 * 1000; // 12h
+        return ageMs < 60 * 60 * 1000;
       })
       .sort((a, b) => b.timestamp - a.timestamp);
-  }, [bull1m, bear1m]);
+  }, [bull1m, bear1m, bull1h, bear1h, bull4h, bear4h]);
 
   const activeSignalMap = useMemo(() => {
     const map = new Map<string, StrategyMatch>();
@@ -176,9 +180,19 @@ const App: React.FC = () => {
               <div className="space-y-16">
                 <div className="space-y-12">
                   <div className="space-y-6">
-                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-4">Trend Matrix (1m)</h3>
+                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-4">Scalp Signals (1m)</h3>
                     <CollapsibleSection title="High Conviction Bullish" timeframe="1m" matches={bull1m} tickerMap={tickerMap} color="emerald" />
                     <CollapsibleSection title="Strategic Exit & Short" timeframe="1m" matches={bear1m} tickerMap={tickerMap} color="rose" />
+                  </div>
+                  <div className="space-y-6">
+                    <h3 className="text-[10px] font-black text-amber-400 uppercase tracking-[0.4em] mb-4">Swing Signals (1h)</h3>
+                    <CollapsibleSection title="Swing Long" timeframe="1h" matches={bull1h} tickerMap={tickerMap} color="emerald" />
+                    <CollapsibleSection title="Swing Short" timeframe="1h" matches={bear1h} tickerMap={tickerMap} color="rose" />
+                  </div>
+                  <div className="space-y-6">
+                    <h3 className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.4em] mb-4">Swing Signals (4h)</h3>
+                    <CollapsibleSection title="Swing Long" timeframe="4h" matches={bull4h} tickerMap={tickerMap} color="emerald" />
+                    <CollapsibleSection title="Swing Short" timeframe="4h" matches={bear4h} tickerMap={tickerMap} color="rose" />
                   </div>
                 </div>
               </div>

@@ -202,3 +202,130 @@ export function detectImpulseSignal(
 
   return null;
 }
+
+// ─── ATR (Average True Range) ───────────────────────────────────────────────
+function calculateATR(candles: Candle[], period: number): number[] {
+  const atr = new Array(candles.length).fill(0);
+  if (candles.length < 2) return atr;
+
+  // True ranges
+  const tr = new Array(candles.length).fill(0);
+  tr[0] = candles[0].high - candles[0].low;
+  for (let i = 1; i < candles.length; i++) {
+    const hl = candles[i].high - candles[i].low;
+    const hpc = Math.abs(candles[i].high - candles[i - 1].close);
+    const lpc = Math.abs(candles[i].low - candles[i - 1].close);
+    tr[i] = Math.max(hl, hpc, lpc);
+  }
+
+  // Wilder-smoothed ATR
+  let sum = 0;
+  for (let i = 0; i < period && i < tr.length; i++) sum += tr[i];
+  atr[period - 1] = sum / period;
+  for (let i = period; i < candles.length; i++) {
+    atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period;
+  }
+  return atr;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SWING: Multi-Confluence Swing Detector (1h / 4h)
+// ═══════════════════════════════════════════════════════════════════════════════
+export function detectSwingSignal(
+  symbol: string,
+  candles: Candle[],
+  timeframe: string,
+  offset = 1
+): StrategyMatch | null {
+  const bars = candles.length;
+  // Need at least 210 bars for EMA 200 + some look-back
+  if (bars < 210) return null;
+
+  const idx = bars - 1 - offset; // Most recent CLOSED candle
+  if (idx < 200) return null;
+
+  const closes = candles.map(c => c.close);
+
+  // ── Compute indicators ────────────────────────────────────────────────────
+  const ema20 = calculateEMA(closes, 20);
+  const ema50 = calculateEMA(closes, 50);
+  const ema200 = calculateEMA(closes, 200);
+  const rsi = calculateRSI(closes, 14);
+  const macdHist = calculateMACDHistogram(closes);
+  const vwap = calculateVWAP(candles);
+  const atr = calculateATR(candles, 14);
+
+  const price = candles[idx].close;
+  const vol = candles[idx].volume;
+  const avgVol = volumeSMA(candles, 20, idx - 1);
+
+  // ── 1. EMA 20/50 Crossover (on THIS candle) ──────────────────────────────
+  const emaCrossAbove = ema20[idx] > ema50[idx] && ema20[idx - 1] <= ema50[idx - 1];
+  const emaCrossBelow = ema20[idx] < ema50[idx] && ema20[idx - 1] >= ema50[idx - 1];
+
+  // ── 2. Macro trend (EMA 200) ──────────────────────────────────────────────
+  const aboveEma200 = price > ema200[idx];
+  const belowEma200 = price < ema200[idx];
+
+  // ── 3. VWAP bias ──────────────────────────────────────────────────────────
+  const aboveVwap = price > vwap[idx];
+  const belowVwap = price < vwap[idx];
+
+  // ── 4. RSI zone ───────────────────────────────────────────────────────────
+  const rsiVal = rsi[idx];
+  const rsiBullZone = rsiVal >= 45 && rsiVal <= 70;
+  const rsiBearZone = rsiVal >= 30 && rsiVal <= 55;
+
+  // ── 5. MACD histogram ─────────────────────────────────────────────────────
+  const macdBull = macdHist[idx] > 0;
+  const macdBear = macdHist[idx] < 0;
+
+  // ── 6. Volume confirmation (1.2× for swing, lower bar than scalp) ─────────
+  const volSpike = avgVol > 0 && vol >= 1.2 * avgVol;
+
+  const currentATR = atr[idx];
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SWING LONG
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (emaCrossAbove && aboveEma200 && aboveVwap && rsiBullZone && macdBull && volSpike) {
+    const sl = price - 1.5 * currentATR;
+    const risk = price - sl;
+    const tp = price + risk * 3; // 3:1 R:R
+
+    return {
+      symbol,
+      price: candles[bars - 1].close,
+      timeframe,
+      type: 'BULLISH',
+      signal: 'SWING_LONG',
+      timestamp: candles[idx].time,
+      entryPrice: price,
+      stopLoss: sl,
+      takeProfit: tp,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SWING SHORT
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (emaCrossBelow && belowEma200 && belowVwap && rsiBearZone && macdBear && volSpike) {
+    const sl = price + 1.5 * currentATR;
+    const risk = sl - price;
+    const tp = price - risk * 3; // 3:1 R:R
+
+    return {
+      symbol,
+      price: candles[bars - 1].close,
+      timeframe,
+      type: 'BEARISH',
+      signal: 'SWING_SHORT',
+      timestamp: candles[idx].time,
+      entryPrice: price,
+      stopLoss: sl,
+      takeProfit: tp,
+    };
+  }
+
+  return null;
+}

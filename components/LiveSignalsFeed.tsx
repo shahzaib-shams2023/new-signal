@@ -9,7 +9,7 @@ interface LiveSignalsFeedProps {
 }
 
 export const LiveSignalsFeed = React.memo<LiveSignalsFeedProps>(({ allSignals, tickerMap }) => {
-    const timeframes = ['1m'];
+    const timeframes = ['1m', '1h', '4h'];
 
     const signalsByTf = useMemo(() => {
         const map: Record<string, StrategyMatch[]> = {};
