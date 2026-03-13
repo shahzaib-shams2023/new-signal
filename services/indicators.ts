@@ -99,7 +99,7 @@ export function detectImpulseSignal(symbol: string, candles: Candle[], timeframe
   // BULLISH Logic
   if (isGreen(finalIdx) && isRed(finalIdx - 1)) {
     // Bullish signal will only be generated when RSI is between 20 - 50 and MACD Histogram is positive
-    if (currentRsi >= 20 && currentRsi <= 50 && currentMacdHist > 0) {
+    if (currentRsi >= 20 && currentRsi <= 70 && currentMacdHist > 0) {
       const confirmG = candles[finalIdx];
       const pullbackR = candles[finalIdx - 1];
 
