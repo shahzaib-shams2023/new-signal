@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StrategyMatch, Candle, FVG } from '../types';
+import { StrategyMatch, Candle } from '../types';
 import { fetchKlinesBatch, getRateLimitStatus, subscribeKlines } from '../services/binanceService';
-import { detectImpulseSignal, detectFVGs, detectFVGSignal } from '../services/indicators';
+import { detectImpulseSignal } from '../services/indicators';
 
 export const useScanner = (scanUniverse: string[]) => {
-    const [bull5m, setBull5m] = useState<StrategyMatch[]>([]);
-    const [bear5m, setBear5m] = useState<StrategyMatch[]>([]);
     const [bull15m, setBull15m] = useState<StrategyMatch[]>([]);
     const [bear15m, setBear15m] = useState<StrategyMatch[]>([]);
     const [bull30m, setBull30m] = useState<StrategyMatch[]>([]);
@@ -21,9 +19,6 @@ export const useScanner = (scanUniverse: string[]) => {
     const scanIndexRef = useRef(0);
     const isScanningRef = useRef(false);
     const symbolsRef = useRef<string[]>([]);
-
-    // Track 1H FVGs
-    const fvgMapRef = useRef<Map<string, FVG[]>>(new Map());
 
     useEffect(() => {
         symbolsRef.current = scanUniverse;
@@ -90,45 +85,30 @@ export const useScanner = (scanUniverse: string[]) => {
                 batch.push(...currentUniverse.slice(0, BATCH_SIZE - batch.length));
             }
 
-            // Proactively subscribe to WebSockets for this batch
-            subscribeKlines(batch, ['5m', '15m', '30m', '1h', '4h']);
+            // Proactively subscribe to WebSockets for this batch to keep cache warm (0 weight REST calls)
+            subscribeKlines(batch, ['15m', '30m', '1h', '4h']);
 
             // Display up to 3 coins to prevent the UI from looking stuck on just 1
             setScanStatus(batch.slice(0, 3).join(', ') + '…');
 
-            // Parallelize scanning
-            const tfs = ['5m', '15m', '30m', '1h', '4h'];
+            // Parallelize scanning of multiple timeframes across the whole batch
+            const tfs = ['15m', '30m', '1h', '4h'];
             await Promise.all(tfs.map(async (tf) => {
-                // Fetch more history for 1H to catch older FVGs
-                const limit = tf === '1h' ? 200 : 120;
-                const batchData = await fetchKlinesBatch(batch, tf, limit);
+                const batchData = await fetchKlinesBatch(batch, tf, 120);
 
+                // Process results for this timeframe
                 batch.forEach(symbol => {
                     const candles = batchData[symbol] || [];
                     if (candles.length < 25) return;
 
-                    // 1. If 1H timeframe, extract and store FVGs
-                    if (tf === '1h') {
-                        const htfGaps = detectFVGs(candles);
-                        fvgMapRef.current.set(symbol, htfGaps);
-                    }
-
-                    // 2. Main Signal Detection
-                    let finalMatch: StrategyMatch | null = null;
-
-                    if (tf === '5m') {
-                        // On 5m, check if price hits the 1H FVG zones we stored
-                        const htfGaps = fvgMapRef.current.get(symbol) || [];
-                        finalMatch = detectFVGSignal(symbol, candles, htfGaps, '5m');
-                    } else {
-                        // On other timeframes, check standard impulse
-                        finalMatch = detectImpulseSignal(symbol, candles, tf, 1);
-                    }
+                    // Check for Impulse signals on the most recent closed candle (offset 1)
+                    const impulseMatch = detectImpulseSignal(symbol, candles, tf, 1);
+                    const finalMatch = impulseMatch;
 
                     if (finalMatch) {
+                        // Map setter based on TF
                         let setterBull: any, setterBear: any;
-                        if (tf === '5m') { setterBull = setBull5m; setterBear = setBear5m; }
-                        else if (tf === '15m') { setterBull = setBull15m; setterBear = setBear15m; }
+                        if (tf === '15m') { setterBull = setBull15m; setterBear = setBear15m; }
                         else if (tf === '30m') { setterBull = setBull30m; setterBear = setBear30m; }
                         else if (tf === '1h') { setterBull = setBull1h; setterBear = setBear1h; }
                         else if (tf === '4h') { setterBull = setBull4h; setterBear = setBear4h; }
@@ -158,7 +138,7 @@ export const useScanner = (scanUniverse: string[]) => {
     }, [scanUniverse.length > 0]);
 
     return {
-        bull5m, bear5m, bull15m, bear15m, bull30m, bear30m,
+        bull15m, bear15m, bull30m, bear30m,
         bull1h, bear1h, bull4h, bear4h,
         totalScanned, scanStatus, weightInfo
     };

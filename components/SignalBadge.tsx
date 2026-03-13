@@ -12,8 +12,6 @@ export const SignalBadge: React.FC<SignalBadgeProps> = ({ signal }) => {
 
     if (signal === 'IMPULSE_BULL') label = '🚀 BULL IMPULSE';
     else if (signal === 'IMPULSE_BEAR') label = '🔥 BEAR IMPULSE';
-    else if (signal === 'FVG_BULL') label = '🎯 1H FVG LONG';
-    else if (signal === 'FVG_BEAR') label = '🎯 1H FVG SHORT';
     else label = `📡 ${signal.replace(/_/g, ' ')}`;
 
     return (
