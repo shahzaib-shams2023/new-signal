@@ -3,8 +3,6 @@ import React from 'react';
 import { WeightGauge } from './WeightGauge';
 
 interface HeaderProps {
-    view: 'feed' | 'detail';
-    setView: (v: 'feed' | 'detail') => void;
     totalSignals: number;
     bullCount: number;
     bearCount: number;
@@ -13,7 +11,7 @@ interface HeaderProps {
 }
 
 export const Header = React.memo<HeaderProps>(({
-    view, setView, totalSignals, bullCount, bearCount, weightInfo, scanStatus
+    totalSignals, bullCount, bearCount, weightInfo, scanStatus
 }) => (
     <header className="flex items-center justify-between px-6 py-4 border-b border-[#2b3139] bg-[#0b0e11]/95 backdrop-blur-xl z-30 shrink-0 sticky top-0">
         <div className="flex items-center gap-6">
@@ -47,20 +45,6 @@ export const Header = React.memo<HeaderProps>(({
         <div className="flex items-center gap-4">
             <WeightGauge pct={weightInfo.pct} used={weightInfo.used} />
 
-            <div className="flex items-center bg-[#161a1e] border border-[#2b3139] rounded-xl p-1 shadow-inner shadow-black/40">
-                <button
-                    onClick={() => setView('feed')}
-                    className={`px-4 py-1.5 rounded-lg text-[11px] font-black transition-all duration-300 ${view === 'feed' ? 'bg-[#2b3139] text-white shadow-lg' : 'text-gray-500 hover:text-gray-300'}`}
-                >
-                    FEED
-                </button>
-                <button
-                    onClick={() => setView('detail')}
-                    className={`px-4 py-1.5 rounded-lg text-[11px] font-black transition-all duration-300 ${view === 'detail' ? 'bg-[#2b3139] text-white shadow-lg' : 'text-gray-500 hover:text-gray-300'}`}
-                >
-                    MATRIX
-                </button>
-            </div>
 
             <div className="hidden lg:flex flex-col items-end min-w-[120px] bg-black/20 px-3 py-1 rounded-lg border border-white/5">
                 <span className="text-[8px] text-gray-500 uppercase tracking-widest font-black leading-none mb-1">Live Subsystem</span>
