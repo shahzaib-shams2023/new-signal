@@ -26,6 +26,8 @@ export interface StrategyMatch {
   signal:
   | 'SCALP_LONG'
   | 'SCALP_SHORT'
+  | 'MID_LONG'
+  | 'MID_SHORT'
   | 'SWING_LONG'
   | 'SWING_SHORT';
   timestamp: number;

@@ -12,6 +12,8 @@ export const SignalBadge: React.FC<SignalBadgeProps> = ({ signal }) => {
 
     if (signal === 'SCALP_LONG') label = '🚀 SCALP LONG';
     else if (signal === 'SCALP_SHORT') label = '🔥 SCALP SHORT';
+    else if (signal === 'MID_LONG') label = '⚡ MID LONG';
+    else if (signal === 'MID_SHORT') label = '💥 MID SHORT';
     else if (signal === 'SWING_LONG') label = '📈 SWING LONG';
     else if (signal === 'SWING_SHORT') label = '📉 SWING SHORT';
     else label = `📡 ${signal.replace(/_/g, ' ')}`;

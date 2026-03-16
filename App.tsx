@@ -12,7 +12,9 @@ import { formatPrice } from './utils/formatters';
 const App: React.FC = () => {
   const { tickers, scanUniverse, tickerMap } = useTickers();
   const {
-    bull1m, bear1m, bull1h, bear1h, bull4h, bear4h,
+    bull1m, bear1m,
+    bull5m, bear5m, bull15m, bear15m, bull30m, bear30m,
+    bull1h, bear1h, bull4h, bear4h,
     totalScanned, scanStatus, weightInfo
   } = useScanner(scanUniverse);
 
@@ -24,19 +26,25 @@ const App: React.FC = () => {
     const now = Date.now();
     const signals = [
       ...bull1m, ...bear1m,
+      ...bull5m, ...bear5m,
+      ...bull15m, ...bear15m,
+      ...bull30m, ...bear30m,
       ...bull1h, ...bear1h,
       ...bull4h, ...bear4h
     ];
     return signals
       .filter(s => {
         const ageMs = now - s.timestamp;
-        if (s.timeframe === '1m') return ageMs < 30 * 60 * 1000;   // 30m
+        if (s.timeframe === '1m') return ageMs < 30 * 60 * 1000;    // 30m
+        if (s.timeframe === '5m') return ageMs < 60 * 60 * 1000;    // 1h
+        if (s.timeframe === '15m') return ageMs < 2 * 60 * 60 * 1000; // 2h
+        if (s.timeframe === '30m') return ageMs < 4 * 60 * 60 * 1000; // 4h
         if (s.timeframe === '1h') return ageMs < 4 * 60 * 60 * 1000; // 4h
         if (s.timeframe === '4h') return ageMs < 12 * 60 * 60 * 1000; // 12h
         return ageMs < 60 * 60 * 1000;
       })
       .sort((a, b) => b.timestamp - a.timestamp);
-  }, [bull1m, bear1m, bull1h, bear1h, bull4h, bear4h]);
+  }, [bull1m, bear1m, bull5m, bear5m, bull15m, bear15m, bull30m, bear30m, bull1h, bear1h, bull4h, bear4h]);
 
   const activeSignalMap = useMemo(() => {
     const map = new Map<string, StrategyMatch>();
@@ -183,6 +191,21 @@ const App: React.FC = () => {
                     <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-4">Scalp Signals (1m)</h3>
                     <CollapsibleSection title="High Conviction Bullish" timeframe="1m" matches={bull1m} tickerMap={tickerMap} color="emerald" />
                     <CollapsibleSection title="Strategic Exit & Short" timeframe="1m" matches={bear1m} tickerMap={tickerMap} color="rose" />
+                  </div>
+                  <div className="space-y-6">
+                    <h3 className="text-[10px] font-black text-violet-400 uppercase tracking-[0.4em] mb-4">Mid Signals (5m)</h3>
+                    <CollapsibleSection title="Mid Long" timeframe="5m" matches={bull5m} tickerMap={tickerMap} color="emerald" />
+                    <CollapsibleSection title="Mid Short" timeframe="5m" matches={bear5m} tickerMap={tickerMap} color="rose" />
+                  </div>
+                  <div className="space-y-6">
+                    <h3 className="text-[10px] font-black text-fuchsia-400 uppercase tracking-[0.4em] mb-4">Mid Signals (15m)</h3>
+                    <CollapsibleSection title="Mid Long" timeframe="15m" matches={bull15m} tickerMap={tickerMap} color="emerald" />
+                    <CollapsibleSection title="Mid Short" timeframe="15m" matches={bear15m} tickerMap={tickerMap} color="rose" />
+                  </div>
+                  <div className="space-y-6">
+                    <h3 className="text-[10px] font-black text-pink-400 uppercase tracking-[0.4em] mb-4">Mid Signals (30m)</h3>
+                    <CollapsibleSection title="Mid Long" timeframe="30m" matches={bull30m} tickerMap={tickerMap} color="emerald" />
+                    <CollapsibleSection title="Mid Short" timeframe="30m" matches={bear30m} tickerMap={tickerMap} color="rose" />
                   </div>
                   <div className="space-y-6">
                     <h3 className="text-[10px] font-black text-amber-400 uppercase tracking-[0.4em] mb-4">Swing Signals (1h)</h3>

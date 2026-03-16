@@ -203,6 +203,113 @@ export function detectImpulseSignal(
   return null;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// MID-TF: Multi-Confluence Detector (5m / 15m / 30m)
+// ═══════════════════════════════════════════════════════════════════════════════
+export function detectMidSignal(
+  symbol: string,
+  candles: Candle[],
+  timeframe: string,
+  offset = 1
+): StrategyMatch | null {
+  const bars = candles.length;
+  // Need at least 55 bars for EMA 50 + look-back
+  if (bars < 55) return null;
+
+  const idx = bars - 1 - offset; // Most recent CLOSED candle
+  if (idx < 50) return null;
+
+  const closes = candles.map(c => c.close);
+
+  // ── Compute all indicators ──────────────────────────────────────────────────
+  const ema9 = calculateEMA(closes, 9);
+  const ema21 = calculateEMA(closes, 21);
+  const ema50 = calculateEMA(closes, 50);
+  const rsi = calculateRSI(closes, 10);     // Slightly longer RSI for mid-TF
+  const macdHist = calculateMACDHistogram(closes);
+  const vwap = calculateVWAP(candles);
+
+  const price = candles[idx].close;
+  const vol = candles[idx].volume;
+  const avgVol = volumeSMA(candles, 20, idx - 1);
+
+  // ── 1. EMA 9/21 Crossover (must happen on THIS candle) ──────────────────────
+  const ema9CrossAbove = ema9[idx] > ema21[idx] && ema9[idx - 1] <= ema21[idx - 1];
+  const ema9CrossBelow = ema9[idx] < ema21[idx] && ema9[idx - 1] >= ema21[idx - 1];
+
+  // ── 2. Trend filter ─────────────────────────────────────────────────────────
+  const aboveEma50 = price > ema50[idx];
+  const belowEma50 = price < ema50[idx];
+
+  // ── 3. VWAP bias ────────────────────────────────────────────────────────────
+  const aboveVwap = price > vwap[idx];
+  const belowVwap = price < vwap[idx];
+
+  // ── 4. RSI zone ─────────────────────────────────────────────────────────────
+  const rsiVal = rsi[idx];
+  const rsiBullZone = rsiVal >= 40 && rsiVal <= 70;
+  const rsiBearZone = rsiVal >= 30 && rsiVal <= 60;
+
+  // ── 5. MACD histogram ──────────────────────────────────────────────────────
+  const macdBull = macdHist[idx] > 0;
+  const macdBear = macdHist[idx] < 0;
+
+  // ── 6. Volume confirmation (1.3× — between scalp 1.5× and swing 1.2×) ─────
+  const volSpike = avgVol > 0 && vol >= 1.3 * avgVol;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MID LONG Signal
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (ema9CrossAbove && aboveEma50 && aboveVwap && rsiBullZone && macdBull && volSpike) {
+    // Stop Loss = lowest low of last 8 candles (wider lookback than scalp)
+    let swingLow = Infinity;
+    for (let i = idx; i > idx - 8 && i >= 0; i--) {
+      if (candles[i].low < swingLow) swingLow = candles[i].low;
+    }
+    const risk = price - swingLow;
+    const tp = price + risk * 2.5; // 2.5:1 R:R
+
+    return {
+      symbol,
+      price: candles[bars - 1].close,
+      timeframe,
+      type: 'BULLISH',
+      signal: 'MID_LONG',
+      timestamp: candles[idx].time,
+      entryPrice: price,
+      stopLoss: swingLow,
+      takeProfit: tp,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MID SHORT Signal
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (ema9CrossBelow && belowEma50 && belowVwap && rsiBearZone && macdBear && volSpike) {
+    // Stop Loss = highest high of last 8 candles
+    let swingHigh = -Infinity;
+    for (let i = idx; i > idx - 8 && i >= 0; i--) {
+      if (candles[i].high > swingHigh) swingHigh = candles[i].high;
+    }
+    const risk = swingHigh - price;
+    const tp = price - risk * 2.5; // 2.5:1 R:R
+
+    return {
+      symbol,
+      price: candles[bars - 1].close,
+      timeframe,
+      type: 'BEARISH',
+      signal: 'MID_SHORT',
+      timestamp: candles[idx].time,
+      entryPrice: price,
+      stopLoss: swingHigh,
+      takeProfit: tp,
+    };
+  }
+
+  return null;
+}
+
 // ─── ATR (Average True Range) ───────────────────────────────────────────────
 function calculateATR(candles: Candle[], period: number): number[] {
   const atr = new Array(candles.length).fill(0);

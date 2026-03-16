@@ -1,11 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StrategyMatch, Candle } from '../types';
 import { fetchKlinesBatch, getRateLimitStatus, subscribeKlines } from '../services/binanceService';
-import { detectImpulseSignal, detectSwingSignal } from '../services/indicators';
+import { detectImpulseSignal, detectMidSignal, detectSwingSignal } from '../services/indicators';
 
 export const useScanner = (scanUniverse: string[]) => {
     const [bull1m, setBull1m] = useState<StrategyMatch[]>([]);
     const [bear1m, setBear1m] = useState<StrategyMatch[]>([]);
+    const [bull5m, setBull5m] = useState<StrategyMatch[]>([]);
+    const [bear5m, setBear5m] = useState<StrategyMatch[]>([]);
+    const [bull15m, setBull15m] = useState<StrategyMatch[]>([]);
+    const [bear15m, setBear15m] = useState<StrategyMatch[]>([]);
+    const [bull30m, setBull30m] = useState<StrategyMatch[]>([]);
+    const [bear30m, setBear30m] = useState<StrategyMatch[]>([]);
     const [bull1h, setBull1h] = useState<StrategyMatch[]>([]);
     const [bear1h, setBear1h] = useState<StrategyMatch[]>([]);
     const [bull4h, setBull4h] = useState<StrategyMatch[]>([]);
@@ -15,8 +21,10 @@ export const useScanner = (scanUniverse: string[]) => {
     const [weightInfo, setWeightInfo] = useState({ used: 0, pct: 0 });
 
     const scalpIndexRef = useRef(0);
+    const midIndexRef = useRef(0);
     const swingIndexRef = useRef(0);
     const isScalpRunningRef = useRef(false);
+    const isMidRunningRef = useRef(false);
     const isSwingRunningRef = useRef(false);
     const symbolsRef = useRef<string[]>([]);
 
@@ -61,6 +69,9 @@ export const useScanner = (scanUniverse: string[]) => {
 
         let setterBull: any, setterBear: any;
         if (tf === '1m') { setterBull = setBull1m; setterBear = setBear1m; }
+        else if (tf === '5m') { setterBull = setBull5m; setterBear = setBear5m; }
+        else if (tf === '15m') { setterBull = setBull15m; setterBear = setBear15m; }
+        else if (tf === '30m') { setterBull = setBull30m; setterBear = setBear30m; }
         else if (tf === '1h') { setterBull = setBull1h; setterBear = setBear1h; }
         else if (tf === '4h') { setterBull = setBull4h; setterBear = setBear4h; }
 
@@ -145,6 +156,67 @@ export const useScanner = (scanUniverse: string[]) => {
     }, [scanUniverse.length > 0]);
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // MID LOOP: 5m/15m/30m Scanner (batch=40, 2s delay)
+    // Moderate pace — candles close every 5–30 minutes
+    // ═══════════════════════════════════════════════════════════════════════════
+    useEffect(() => {
+        if (scanUniverse.length === 0 || isMidRunningRef.current) return;
+        isMidRunningRef.current = true;
+
+        const BATCH = 40;
+
+        const scanMid = async () => {
+            if (!isMidRunningRef.current) return;
+
+            const universe = symbolsRef.current;
+            if (universe.length === 0) {
+                setTimeout(scanMid, 3000);
+                return;
+            }
+
+            const rl = getRateLimitStatus();
+            if (rl.isLimited) {
+                setTimeout(scanMid, 8000);
+                return;
+            }
+
+            const idx = midIndexRef.current % universe.length;
+            const batch = universe.slice(idx, idx + BATCH);
+            if (batch.length < BATCH && universe.length > BATCH) {
+                batch.push(...universe.slice(0, BATCH - batch.length));
+            }
+
+            // Subscribe this batch to WebSockets for mid timeframes
+            subscribeKlines(batch, ['1m', '5m', '15m', '30m', '1h', '4h']);
+
+            try {
+                // Process 5m, 15m, 30m in parallel
+                await Promise.all(['5m', '15m', '30m'].map(async (tf) => {
+                    const batchData = await fetchKlinesBatch(batch, tf, 120);
+
+                    batch.forEach(symbol => {
+                        const candles = batchData[symbol] || [];
+                        if (candles.length < 55) return;
+                        if (!shouldAnalyze(symbol, tf, candles)) return;
+
+                        const match = detectMidSignal(symbol, candles, tf, 1);
+                        processSignal(match, symbol, tf);
+                    });
+                }));
+            } catch (_) { }
+
+            midIndexRef.current = (idx + batch.length) % universe.length;
+
+            // 2s delay — mid-TF candles close every 5–30 min, moderate pace
+            setTimeout(scanMid, 2_000);
+        };
+
+        // Delay mid start by 1.5s so the fast loop gets priority
+        setTimeout(scanMid, 1500);
+        return () => { isMidRunningRef.current = false; };
+    }, [scanUniverse.length > 0]);
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // SLOW LOOP: 1h/4h Swing Scanner (batch=50, 10s delay)
     // Runs at a relaxed pace since higher TF candles change slowly
     // ═══════════════════════════════════════════════════════════════════════════
@@ -176,7 +248,7 @@ export const useScanner = (scanUniverse: string[]) => {
             }
 
             // Subscribe this batch to WebSockets for all timeframes
-            subscribeKlines(batch, ['1m', '1h', '4h']);
+            subscribeKlines(batch, ['1m', '5m', '15m', '30m', '1h', '4h']);
 
             try {
                 // Process 1h and 4h in parallel
@@ -206,7 +278,9 @@ export const useScanner = (scanUniverse: string[]) => {
     }, [scanUniverse.length > 0]);
 
     return {
-        bull1m, bear1m, bull1h, bear1h, bull4h, bear4h,
+        bull1m, bear1m,
+        bull5m, bear5m, bull15m, bear15m, bull30m, bear30m,
+        bull1h, bear1h, bull4h, bear4h,
         totalScanned, scanStatus, weightInfo
     };
 };

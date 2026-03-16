@@ -217,6 +217,9 @@ const candleCache = new Map<string, CacheEntry>();
 
 const CANDLE_TTL: Record<string, number> = {
   '1m': 60_000 * 0.9,    // 54 seconds
+  '5m': 60_000 * 4.5,    // 4.5 minutes
+  '15m': 60_000 * 13,    // 13 minutes
+  '30m': 60_000 * 27,    // 27 minutes
   '1h': 60_000 * 50,     // 50 minutes
   '4h': 60_000 * 210,    // 3.5 hours
 };
