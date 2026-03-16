@@ -19,15 +19,19 @@ const WS_BASE = 'wss://fstream.binance.com/ws';
 const WS_COMBINED = 'wss://fstream.binance.com/stream?streams=';
 
 // ─── Weight / back-off state ──────────────────────────────────────────────────
+// Binance limits: 2400 weight / min per IP.
+const WEIGHT_MAX = 2400;
+const WEIGHT_CRITICAL = 1750; // Stop low-priority tasks
+const WEIGHT_STOP = 2100;     // Stop all tasks
+const COALESCE_TTL = 1000;     // Deduplicate identical requests within 1s
+
 let usedWeight1m = 0;
 let virtualWeight = 0; // Tracks "in-flight" weight
 let backoffUntil = 0;
 let banType: 'NONE' | 'RATE_LIMIT' | 'IP_BAN' = 'NONE';
 
-// Binance USD-M Futures limit is 2400 weight per minute.
-// We are extremely conservative to avoid any possibility of 429.
-const WEIGHT_STOP = 1600;
-const WEIGHT_MAX = 2400;
+// Track in-flight requests for coalescing (deduplication)
+const inFlightRequests = new Map<string, Promise<any>>();
 
 export const getRateLimitStatus = () => {
   const currentUsed = Math.max(usedWeight1m, virtualWeight);
@@ -54,12 +58,12 @@ function jitter(baseMs: number, spread = 0.3) {
 interface QueuedTask {
   endpoint: string;
   weight: number;
+  priority: number; // 0=Low, 1=Normal, 2=High
   resolve: (v: any) => void;
   reject: (e: any) => void;
 }
 
 const queue: QueuedTask[] = [];
-const MAX_CONCURRENT = 5; // Reduced for safer weight management
 let activeRequests = 0;
 let isProcessing = false;
 
@@ -67,22 +71,38 @@ async function processQueue() {
   if (isProcessing) return;
   isProcessing = true;
 
-  while (queue.length > 0 && activeRequests < MAX_CONCURRENT) {
-    // ── Back-off gate ────────────────────────────────────────────────────────
-    const now = Date.now();
-    const remaining = backoffUntil - now;
+  while (queue.length > 0) {
+    // 1. Check Global Backoff
+    const remaining = backoffUntil - Date.now();
     if (remaining > 0) {
-      await sleep(remaining + jitter(500));
+      await sleep(remaining + 500);
       continue;
     }
 
-    // ── Proactive Weight Throttle ────────────────────────────────────────────
-    // If virtual weight is high, we stop completely for a while or wait for real updates.
-    if (virtualWeight >= WEIGHT_STOP) {
-      // Every 10s we allow the weight to "decay" locally so we can test the API again
-      // and get the true updated weight header.
-      await sleep(5_000);
-      virtualWeight = Math.max(0, virtualWeight - 50);
+    // 2. Adaptive Concurrency Limit
+    // If weight is low, high concurrency. If weight is high, serial execution.
+    const currentWeight = Math.max(usedWeight1m, virtualWeight);
+    const maxConcurrent = currentWeight > 1500 ? 1 : 10;
+
+    if (activeRequests >= maxConcurrent) {
+      await sleep(50);
+      continue;
+    }
+
+    // 3. Weight Hard-Stop
+    if (currentWeight >= WEIGHT_STOP) {
+      await sleep(2000);
+      virtualWeight *= 0.9; // Artificial decay
+      continue;
+    }
+
+    // 4. Priority Filter
+    // Sort queue by priority: High (2) -> Normal (1) -> Low (0)
+    queue.sort((a, b) => b.priority - a.priority);
+
+    // If we are at CRITICAL weight, skip Low Priority tasks
+    if (currentWeight > WEIGHT_CRITICAL && queue[0].priority === 0) {
+      await sleep(5000); // Wait for weight reset
       continue;
     }
 
@@ -90,7 +110,6 @@ async function processQueue() {
     activeRequests++;
     virtualWeight += task.weight;
 
-    // Execute task
     (async () => {
       try {
         const result = await executeRequest(task.endpoint, task.weight);
@@ -99,30 +118,46 @@ async function processQueue() {
         task.reject(err);
       } finally {
         activeRequests--;
-        // Virtual weight is kept for 5 seconds to represent current "load" 
-        // until we get a fresh header from the next request.
-        setTimeout(() => {
-          // No-op, just holding the virtual weight for a buffer period
-        }, 5000);
+        // Keep virtual weight buffer for 3 seconds
+        setTimeout(() => { virtualWeight = Math.max(usedWeight1m, virtualWeight - task.weight); }, 3000);
         processQueue();
       }
     })();
 
-    // Stagger starts to avoid micro-bursts hitting the API simultaneously
-    await sleep(200);
+    // Stagger starts to avoid burst spikes
+    const stagger = currentWeight > 1000 ? 400 : 50;
+    await sleep(stagger);
   }
 
   isProcessing = false;
-  if (queue.length > 0 && activeRequests < MAX_CONCURRENT) {
-    processQueue();
-  }
 }
 
-function enqueue<T>(endpoint: string, weight: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    queue.push({ endpoint, weight, resolve: resolve as any, reject });
+/**
+ * Optimized Enqueue with Request Coalescing
+ */
+function enqueue<T>(endpoint: string, weight: number, priority = 1): Promise<T> {
+  const cacheKey = `${endpoint}`;
+
+  // If a request for the same endpoint is already in flight, return the same promise.
+  // This prevents multiple components from hammering the API for the same data.
+  const existing = inFlightRequests.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = new Promise<T>((resolve, reject) => {
+    queue.push({ endpoint, weight, priority, resolve: resolve as any, reject });
     processQueue();
   });
+
+  inFlightRequests.set(cacheKey, promise);
+
+  // Clear coalescing key after result or TTL to allow fresh updates later
+  promise.finally(() => {
+    setTimeout(() => inFlightRequests.delete(cacheKey), COALESCE_TTL);
+  });
+
+  return promise;
 }
 
 // ─── Execute a single REST request ────────────────────────────────────────────
@@ -195,7 +230,8 @@ async function executeRequest(endpoint: string, weight: number): Promise<any> {
 export const fetchKlinesBatch = async (
   symbols: string[],
   interval: string,
-  limit = 100
+  limit = 100,
+  priority = 1
 ): Promise<Record<string, Candle[]>> => {
   const results: Record<string, Candle[]> = {};
   const toFetch: string[] = [];
@@ -211,10 +247,10 @@ export const fetchKlinesBatch = async (
 
   if (toFetch.length === 0) return results;
 
-  // Process batch in parallel while respecting our queue's MAX_CONCURRENT (5)
+  // Process batch while respecting our queue's internal throttling
   await Promise.all(toFetch.map(async (symbol) => {
     try {
-      results[symbol] = await fetchKlines(symbol, interval, limit);
+      results[symbol] = await fetchKlines(symbol, interval, limit, priority);
     } catch (_) {
       results[symbol] = [];
     }
@@ -494,14 +530,12 @@ export const fetchTickers = async (): Promise<SymbolInfo[]> => {
 export const fetchKlines = async (
   symbol: string,
   interval: string,
-  limit = 90
+  limit = 90,
+  priority = 1
 ): Promise<Candle[]> => {
   const cacheKey = `${symbol}-${interval}`;
   const cached = getCached(cacheKey, interval);
 
-  // Optimization: If we have cached candles and they were fetched within the TTL,
-  // return them regardless of length. This prevents spamming the API for
-  // new coins that don't have enough history to reach the requested limit.
   if (cached) {
     return cached.slice(-limit);
   }
@@ -509,7 +543,8 @@ export const fetchKlines = async (
   try {
     const data = await enqueue<any[]>(
       `/klines?symbol=${symbol}&interval=${interval}&limit=${Math.max(limit, 100)}`,
-      1
+      1,
+      priority
     );
 
     if (!Array.isArray(data)) {

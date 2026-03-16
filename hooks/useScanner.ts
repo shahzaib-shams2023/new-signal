@@ -138,7 +138,8 @@ export const useScanner = (scanUniverse: string[]) => {
             setScanStatus(`⚡ ${batch.slice(0, 3).join(', ')}…`);
 
             try {
-                const batchData = await fetchKlinesBatch(batch, '1m', 120);
+                // Priority: High (2) for 1m Scalp
+                const batchData = await fetchKlinesBatch(batch, '1m', 120, 2);
 
                 batch.forEach(symbol => {
                     const candles = batchData[symbol] || [];
@@ -199,7 +200,8 @@ export const useScanner = (scanUniverse: string[]) => {
             try {
                 // Sequential processing of timeframes to avoid bursts
                 for (const tf of ['5m', '15m', '30m']) {
-                    const batchData = await fetchKlinesBatch(batch, tf, 120);
+                    // Priority: Normal (1) for Mid-TFs
+                    const batchData = await fetchKlinesBatch(batch, tf, 120, 1);
 
                     batch.forEach(symbol => {
                         const candles = batchData[symbol] || [];
@@ -261,7 +263,8 @@ export const useScanner = (scanUniverse: string[]) => {
 
             try {
                 for (const tf of ['1h', '4h']) {
-                    const batchData = await fetchKlinesBatch(batch, tf, 250);
+                    // Priority: Low (0) for Swing TFs
+                    const batchData = await fetchKlinesBatch(batch, tf, 250, 0);
 
                     batch.forEach(symbol => {
                         const candles = batchData[symbol] || [];
