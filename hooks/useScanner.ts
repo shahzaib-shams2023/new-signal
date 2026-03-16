@@ -155,7 +155,8 @@ export const useScanner = (scanUniverse: string[]) => {
             setTotalScanned(prev => prev + batch.length);
             scalpIndexRef.current = (idx + batch.length) % universe.length;
 
-            setTimeout(scanScalp, 50);
+            // Freq: ~1 batch per second = ~30 req/min (very lightweight)
+            setTimeout(scanScalp, 1000);
         };
 
         scanScalp();
@@ -196,7 +197,8 @@ export const useScanner = (scanUniverse: string[]) => {
             subscribeKlines(batch, ['1m', '5m', '15m', '30m', '1h', '4h']);
 
             try {
-                await Promise.all(['5m', '15m', '30m'].map(async (tf) => {
+                // Sequential processing of timeframes to avoid bursts
+                for (const tf of ['5m', '15m', '30m']) {
                     const batchData = await fetchKlinesBatch(batch, tf, 120);
 
                     batch.forEach(symbol => {
@@ -204,17 +206,20 @@ export const useScanner = (scanUniverse: string[]) => {
                         if (candles.length < 55) return;
                         if (!shouldAnalyze(symbol, tf, candles)) return;
 
-                        // HTF: check 1h trend bias from cache
                         const htfBias = getHTFBias(symbol, '1h');
                         const match = detectMidSignal(symbol, candles, tf, 1, htfBias);
                         processSignal(match, symbol, tf);
                     });
-                }));
+
+                    // Stagger between timeframes
+                    await new Promise(r => setTimeout(r, 500));
+                }
             } catch (_) { }
 
             midIndexRef.current = (idx + batch.length) % universe.length;
 
-            setTimeout(scanMid, 2_000);
+            // Freq: Every 15s = ~8 batches/min = ~240 symbols/min
+            setTimeout(scanMid, 15_000);
         };
 
         setTimeout(scanMid, 1500);
@@ -255,7 +260,7 @@ export const useScanner = (scanUniverse: string[]) => {
             subscribeKlines(batch, ['1m', '5m', '15m', '30m', '1h', '4h']);
 
             try {
-                await Promise.all(['1h', '4h'].map(async (tf) => {
+                for (const tf of ['1h', '4h']) {
                     const batchData = await fetchKlinesBatch(batch, tf, 250);
 
                     batch.forEach(symbol => {
@@ -263,17 +268,18 @@ export const useScanner = (scanUniverse: string[]) => {
                         if (candles.length < 210) return;
                         if (!shouldAnalyze(symbol, tf, candles)) return;
 
-                        // HTF: 1h uses 4h bias; 4h has no higher TF available
                         const htfBias = tf === '1h' ? getHTFBias(symbol, '4h') : undefined;
                         const match = detectSwingSignal(symbol, candles, tf, 1, htfBias);
                         processSignal(match, symbol, tf);
                     });
-                }));
+                    await new Promise(r => setTimeout(r, 1000));
+                }
             } catch (_) { }
 
             swingIndexRef.current = (idx + batch.length) % universe.length;
 
-            setTimeout(scanSwing, 10_000);
+            // Freq: Every 30s
+            setTimeout(scanSwing, 30_000);
         };
 
         setTimeout(scanSwing, 3000);

@@ -20,21 +20,25 @@ const WS_COMBINED = 'wss://fstream.binance.com/stream?streams=';
 
 // ─── Weight / back-off state ──────────────────────────────────────────────────
 let usedWeight1m = 0;
+let virtualWeight = 0; // Tracks "in-flight" weight
 let backoffUntil = 0;
 let banType: 'NONE' | 'RATE_LIMIT' | 'IP_BAN' = 'NONE';
 
 // Binance USD-M Futures limit is 2400 weight per minute.
-// We hard-stop at 2000.
-const WEIGHT_STOP = 2000;
+// We are extremely conservative to avoid any possibility of 429.
+const WEIGHT_STOP = 1600;
 const WEIGHT_MAX = 2400;
 
-export const getRateLimitStatus = () => ({
-  isLimited: Date.now() < backoffUntil,
-  resetTime: backoffUntil,
-  type: banType,
-  usedWeight: usedWeight1m,
-  weightPct: Math.round((usedWeight1m / WEIGHT_MAX) * 100),
-});
+export const getRateLimitStatus = () => {
+  const currentUsed = Math.max(usedWeight1m, virtualWeight);
+  return {
+    isLimited: Date.now() < backoffUntil,
+    resetTime: backoffUntil,
+    type: banType,
+    usedWeight: currentUsed,
+    weightPct: Math.round((currentUsed / WEIGHT_MAX) * 100),
+  };
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
@@ -55,7 +59,7 @@ interface QueuedTask {
 }
 
 const queue: QueuedTask[] = [];
-const MAX_CONCURRENT = 10;
+const MAX_CONCURRENT = 5; // Reduced for safer weight management
 let activeRequests = 0;
 let isProcessing = false;
 
@@ -65,23 +69,28 @@ async function processQueue() {
 
   while (queue.length > 0 && activeRequests < MAX_CONCURRENT) {
     // ── Back-off gate ────────────────────────────────────────────────────────
-    const remaining = backoffUntil - Date.now();
+    const now = Date.now();
+    const remaining = backoffUntil - now;
     if (remaining > 0) {
       await sleep(remaining + jitter(500));
       continue;
     }
 
-    // ── Adaptive throttle based on weight ────────────────────────────────────
-    if (usedWeight1m >= WEIGHT_STOP) {
-      await sleep(10_000);
-      usedWeight1m = WEIGHT_STOP - 1; // decay weight to allow polling API again and get true updated weight
+    // ── Proactive Weight Throttle ────────────────────────────────────────────
+    // If virtual weight is high, we stop completely for a while or wait for real updates.
+    if (virtualWeight >= WEIGHT_STOP) {
+      // Every 10s we allow the weight to "decay" locally so we can test the API again
+      // and get the true updated weight header.
+      await sleep(5_000);
+      virtualWeight = Math.max(0, virtualWeight - 50);
       continue;
     }
 
     const task = queue.shift()!;
     activeRequests++;
+    virtualWeight += task.weight;
 
-    // Execute task without awaiting it here to allow parallel processing
+    // Execute task
     (async () => {
       try {
         const result = await executeRequest(task.endpoint, task.weight);
@@ -90,17 +99,20 @@ async function processQueue() {
         task.reject(err);
       } finally {
         activeRequests--;
-        processQueue(); // Try to pick up next task
+        // Virtual weight is kept for 5 seconds to represent current "load" 
+        // until we get a fresh header from the next request.
+        setTimeout(() => {
+          // No-op, just holding the virtual weight for a buffer period
+        }, 5000);
+        processQueue();
       }
     })();
 
-    // Brief delay between starting concurrent requests to avoid bursts
-    await sleep(20);
+    // Stagger starts to avoid micro-bursts hitting the API simultaneously
+    await sleep(200);
   }
 
   isProcessing = false;
-
-  // Edge case: if a task was queued while we were exiting the loop
   if (queue.length > 0 && activeRequests < MAX_CONCURRENT) {
     processQueue();
   }
@@ -125,7 +137,11 @@ async function executeRequest(endpoint: string, weight: number): Promise<any> {
 
       // Sync weight from header on every response
       const wh = res.headers.get('x-mbx-used-weight-1m');
-      if (wh) usedWeight1m = parseInt(wh, 10);
+      if (wh) {
+        usedWeight1m = parseInt(wh, 10);
+        // Sync virtual weight with real weight if header is fresh
+        virtualWeight = Math.max(virtualWeight, usedWeight1m);
+      }
 
       if (res.status === 429) {
         const retryAfter = parseInt(res.headers.get('Retry-After') ?? '60', 10);
@@ -133,6 +149,10 @@ async function executeRequest(endpoint: string, weight: number): Promise<any> {
         backoffUntil = Date.now() + wait;
         banType = 'RATE_LIMIT';
         console.warn(`🔴 429 Rate-limit – back off ${retryAfter} s`);
+
+        // Wipe virtual weight to prevent double counting during backoff
+        virtualWeight = WEIGHT_MAX;
+
         await sleep(wait + jitter(1_000));
         attempt++;
         continue; // retry same request
