@@ -143,8 +143,8 @@ export const useScanner = (scanUniverse: string[]) => {
                     if (candles.length < 55) return;
                     if (!shouldAnalyze(symbol, '1m', candles)) return;
 
-                    // HTF: check 30m trend bias from cache (changed from 15m)
-                    const htfBias = getHTFBias(symbol, '30m');
+                    // HTF: check 15m trend bias from cache
+                    const htfBias = getHTFBias(symbol, '15m');
                     const match = detectImpulseSignal(symbol, candles, '1m', 1, htfBias);
                     processSignal(match, symbol, '1m');
                 });
@@ -192,7 +192,7 @@ export const useScanner = (scanUniverse: string[]) => {
                 batch.push(...universe.slice(0, BATCH - batch.length));
             }
 
-            subscribeKlines(batch, ['1m', '5m', '30m', '1h', '4h']);
+            subscribeKlines(batch, ['1m', '5m', '15m', '30m', '1h', '4h']);
 
             try {
                 // Sequential processing of timeframes to avoid bursts
@@ -256,7 +256,7 @@ export const useScanner = (scanUniverse: string[]) => {
                 batch.push(...universe.slice(0, BATCH - batch.length));
             }
 
-            subscribeKlines(batch, ['1m', '5m', '30m', '1h', '4h']);
+            subscribeKlines(batch, ['1m', '5m', '15m', '30m', '1h', '4h']);
 
             try {
                 for (const tf of ['1h', '4h']) {

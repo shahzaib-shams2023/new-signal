@@ -22,6 +22,7 @@ const App: React.FC = () => {
     const now = Date.now();
     const signals = [
       ...bull1m, ...bear1m,
+      ...bull5m, ...bear5m,
       ...bull30m, ...bear30m,
       ...bull1h, ...bear1h,
       ...bull4h, ...bear4h
