@@ -160,6 +160,7 @@ export function detectImpulseSignal(
       if (candles[i].low < swingLow) swingLow = candles[i].low;
     }
     const risk = price - swingLow;
+    if (risk <= 0) return null; // Guard: no valid risk distance
     const tp = price + risk * 2; // 2:1 R:R
 
     return {
@@ -185,6 +186,7 @@ export function detectImpulseSignal(
       if (candles[i].high > swingHigh) swingHigh = candles[i].high;
     }
     const risk = swingHigh - price;
+    if (risk <= 0) return null; // Guard: no valid risk distance
     const tp = price - risk * 2; // 2:1 R:R
 
     return {
@@ -267,6 +269,7 @@ export function detectMidSignal(
       if (candles[i].low < swingLow) swingLow = candles[i].low;
     }
     const risk = price - swingLow;
+    if (risk <= 0) return null; // Guard: no valid risk distance
     const tp = price + risk * 2.5; // 2.5:1 R:R
 
     return {
@@ -292,6 +295,7 @@ export function detectMidSignal(
       if (candles[i].high > swingHigh) swingHigh = candles[i].high;
     }
     const risk = swingHigh - price;
+    if (risk <= 0) return null; // Guard: no valid risk distance
     const tp = price - risk * 2.5; // 2.5:1 R:R
 
     return {
@@ -398,6 +402,7 @@ export function detectSwingSignal(
   if (emaCrossAbove && aboveEma200 && aboveVwap && rsiBullZone && macdBull && volSpike) {
     const sl = price - 1.5 * currentATR;
     const risk = price - sl;
+    if (risk <= 0) return null; // Guard: no valid risk distance
     const tp = price + risk * 3; // 3:1 R:R
 
     return {
@@ -419,6 +424,7 @@ export function detectSwingSignal(
   if (emaCrossBelow && belowEma200 && belowVwap && rsiBearZone && macdBear && volSpike) {
     const sl = price + 1.5 * currentATR;
     const risk = sl - price;
+    if (risk <= 0) return null; // Guard: no valid risk distance
     const tp = price - risk * 3; // 3:1 R:R
 
     return {

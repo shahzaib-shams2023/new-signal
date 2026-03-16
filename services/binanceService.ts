@@ -239,7 +239,7 @@ function getCached(key: string, interval: string): Candle[] | null {
 
 function setCache(key: string, candles: Candle[]) {
   candleCache.set(key, { candles, fetchedAt: Date.now() });
-  // Keep map size bounded (max 5000 entries ≈ 1500 symbols × 3 tfs)
+  // Keep map size bounded (max 5000 entries ≈ ~830 symbols × 6 tfs)
   if (candleCache.size > 5_000) {
     const firstKey = candleCache.keys().next().value;
     if (firstKey) candleCache.delete(firstKey);
