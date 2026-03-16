@@ -143,8 +143,8 @@ export const useScanner = (scanUniverse: string[]) => {
                     if (candles.length < 55) return;
                     if (!shouldAnalyze(symbol, '1m', candles)) return;
 
-                    // HTF: check 15m trend bias from cache
-                    const htfBias = getHTFBias(symbol, '15m');
+                    // HTF: check 5m trend bias from cache (more responsive for scalps)
+                    const htfBias = getHTFBias(symbol, '5m');
                     const match = detectImpulseSignal(symbol, candles, '1m', 1, htfBias);
                     processSignal(match, symbol, '1m');
                 });

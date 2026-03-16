@@ -21,6 +21,22 @@ export const SignalCard = React.memo<SignalCardProps>(({ match, ticker, compact 
     const moveAccent = isBull ? 'text-[#00ffcc]' : 'text-[#ff3e8d]';
     const entryLabel = isBull ? 'Entry (Long)' : 'Entry (Short)';
 
+    // Calculate R:R ratio
+    const entry = match.entryPrice ?? match.price;
+    const sl = match.stopLoss ?? 0;
+    const tp = match.takeProfit ?? 0;
+    let riskReward = 0;
+    let riskPct = 0;
+    if (sl && tp && entry) {
+        const risk = Math.abs(entry - sl);
+        const reward = Math.abs(tp - entry);
+        riskReward = risk > 0 ? reward / risk : 0;
+        riskPct = (risk / entry) * 100;
+    }
+
+    const rrColor = riskReward >= 2.5 ? 'text-emerald-400' : riskReward >= 1.5 ? 'text-yellow-400' : 'text-rose-400';
+    const rrBg = riskReward >= 2.5 ? 'bg-emerald-500/10 border-emerald-500/20' : riskReward >= 1.5 ? 'bg-yellow-500/10 border-yellow-500/20' : 'bg-rose-500/10 border-rose-500/20';
+
     if (compact) {
         return (
             <div className={`relative group rounded-xl bg-[#1e2329]/80 backdrop-blur-sm border border-[#2b3139] ${accentBorder} transition-all duration-300 overflow-hidden flex items-center gap-3 px-4 py-3 min-w-0 w-full hover:shadow-lg hover:shadow-black/20`}>
@@ -29,6 +45,11 @@ export const SignalCard = React.memo<SignalCardProps>(({ match, ticker, compact 
                     <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-black text-gray-100">{match.symbol.replace('USDT', '')}</span>
                         <span className="text-[10px] font-bold text-indigo-300 bg-indigo-500/10 border-indigo-500/20 border px-1.5 py-0.5 rounded">{match.timeframe}</span>
+                        {riskReward > 0 && (
+                            <span className={`text-[9px] font-bold ${rrColor} ${rrBg} border px-1.5 py-0.5 rounded`}>
+                                R:R {riskReward.toFixed(1)}
+                            </span>
+                        )}
                         <div className="flex-1 flex justify-end">
                             <span className="text-[10px] text-gray-500 font-medium">{timeAgo(match.timestamp)}</span>
                         </div>
@@ -96,12 +117,26 @@ export const SignalCard = React.memo<SignalCardProps>(({ match, ticker, compact 
                 </div>
 
                 <div className="flex items-center justify-between pt-2 border-t border-white/5">
-                    <div className="flex gap-1.5">
-                        {[1, 2, 3].map((_, i) => (
-                            <div key={i} className={`w-1 h-3 rounded-full ${isBull ? 'bg-emerald-500/30' : 'bg-rose-500/30'} ${i === 1 ? 'h-4' : ''}`} />
-                        ))}
+                    <div className="flex items-center gap-3">
+                        {riskReward > 0 && (
+                            <span className={`text-[10px] font-black ${rrColor} ${rrBg} border px-2 py-0.5 rounded-md`}>
+                                R:R {riskReward.toFixed(1)}:1
+                            </span>
+                        )}
+                        {riskPct > 0 && (
+                            <span className="text-[10px] font-bold text-orange-400/70 bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 rounded-md">
+                                Risk {riskPct.toFixed(2)}%
+                            </span>
+                        )}
                     </div>
-                    <span className="text-[9px] font-black text-gray-600 tracking-[0.2em] uppercase">High Volume Confirmed</span>
+                    <div className="flex items-center gap-2">
+                        <div className="flex gap-1">
+                            {[1, 2, 3].map((_, i) => (
+                                <div key={i} className={`w-1 h-3 rounded-full ${isBull ? 'bg-emerald-500/30' : 'bg-rose-500/30'} ${i === 1 ? 'h-4' : ''}`} />
+                            ))}
+                        </div>
+                        <span className="text-[9px] font-black text-gray-600 tracking-[0.15em] uppercase">Pullback Entry</span>
+                    </div>
                 </div>
             </div>
         </div>
