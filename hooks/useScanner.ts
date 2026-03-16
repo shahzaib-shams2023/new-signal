@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StrategyMatch, Candle } from '../types';
-import { fetchKlinesBatch, getRateLimitStatus, subscribeKlines } from '../services/binanceService';
-import { detectImpulseSignal, detectMidSignal, detectSwingSignal } from '../services/indicators';
+import { fetchKlinesBatch, getRateLimitStatus, subscribeKlines, getCachedCandles } from '../services/binanceService';
+import { detectImpulseSignal, detectMidSignal, detectSwingSignal, computeTrendBias } from '../services/indicators';
 
 export const useScanner = (scanUniverse: string[]) => {
     const [bull1m, setBull1m] = useState<StrategyMatch[]>([]);
@@ -28,7 +28,6 @@ export const useScanner = (scanUniverse: string[]) => {
     const isSwingRunningRef = useRef(false);
     const symbolsRef = useRef<string[]>([]);
 
-    // Track last checked candle timestamp per symbol/tf to avoid redundant analysis
     const lastCheckedRef = useRef<Map<string, number>>(new Map());
 
     useEffect(() => {
@@ -84,20 +83,26 @@ export const useScanner = (scanUniverse: string[]) => {
         }
     };
 
-    // Check if a candle has already been analyzed (skip if same candle)
     const shouldAnalyze = (symbol: string, tf: string, candles: Candle[]): boolean => {
         if (candles.length < 2) return false;
-        const lastClosed = candles[candles.length - 2]; // offset=1 candle
+        const lastClosed = candles[candles.length - 2];
         const key = `${symbol}-${tf}`;
         const prev = lastCheckedRef.current.get(key);
-        if (prev === lastClosed.time) return false; // Same candle, skip
+        if (prev === lastClosed.time) return false;
         lastCheckedRef.current.set(key, lastClosed.time);
         return true;
     };
 
+    // Helper: get HTF trend bias from cached candles (no API call)
+    const getHTFBias = (symbol: string, htfInterval: string): 'BULLISH' | 'BEARISH' | 'NEUTRAL' | undefined => {
+        const cached = getCachedCandles(symbol, htfInterval);
+        if (!cached || cached.length < 55) return undefined; // No data yet, skip HTF filter
+        return computeTrendBias(cached);
+    };
+
     // ═══════════════════════════════════════════════════════════════════════════
-    // FAST LOOP: 1m Scalp Scanner (batch=30, 50ms delay)
-    // Runs continuously to catch every 1m candle close
+    // FAST LOOP: 1m Scalp Scanner
+    // HTF confirmation: uses cached 15m trend bias
     // ═══════════════════════════════════════════════════════════════════════════
     useEffect(() => {
         if (scanUniverse.length === 0 || isScalpRunningRef.current) return;
@@ -140,7 +145,9 @@ export const useScanner = (scanUniverse: string[]) => {
                     if (candles.length < 55) return;
                     if (!shouldAnalyze(symbol, '1m', candles)) return;
 
-                    const match = detectImpulseSignal(symbol, candles, '1m', 1);
+                    // HTF: check 15m trend bias from cache
+                    const htfBias = getHTFBias(symbol, '15m');
+                    const match = detectImpulseSignal(symbol, candles, '1m', 1, htfBias);
                     processSignal(match, symbol, '1m');
                 });
             } catch (_) { }
@@ -156,8 +163,8 @@ export const useScanner = (scanUniverse: string[]) => {
     }, [scanUniverse.length > 0]);
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // MID LOOP: 5m/15m/30m Scanner (batch=40, 2s delay)
-    // Moderate pace — candles close every 5–30 minutes
+    // MID LOOP: 5m/15m/30m Scanner
+    // HTF confirmation: uses cached 1h trend bias
     // ═══════════════════════════════════════════════════════════════════════════
     useEffect(() => {
         if (scanUniverse.length === 0 || isMidRunningRef.current) return;
@@ -186,11 +193,9 @@ export const useScanner = (scanUniverse: string[]) => {
                 batch.push(...universe.slice(0, BATCH - batch.length));
             }
 
-            // Subscribe this batch to WebSockets for mid timeframes
             subscribeKlines(batch, ['1m', '5m', '15m', '30m', '1h', '4h']);
 
             try {
-                // Process 5m, 15m, 30m in parallel
                 await Promise.all(['5m', '15m', '30m'].map(async (tf) => {
                     const batchData = await fetchKlinesBatch(batch, tf, 120);
 
@@ -199,7 +204,9 @@ export const useScanner = (scanUniverse: string[]) => {
                         if (candles.length < 55) return;
                         if (!shouldAnalyze(symbol, tf, candles)) return;
 
-                        const match = detectMidSignal(symbol, candles, tf, 1);
+                        // HTF: check 1h trend bias from cache
+                        const htfBias = getHTFBias(symbol, '1h');
+                        const match = detectMidSignal(symbol, candles, tf, 1, htfBias);
                         processSignal(match, symbol, tf);
                     });
                 }));
@@ -207,18 +214,16 @@ export const useScanner = (scanUniverse: string[]) => {
 
             midIndexRef.current = (idx + batch.length) % universe.length;
 
-            // 2s delay — mid-TF candles close every 5–30 min, moderate pace
             setTimeout(scanMid, 2_000);
         };
 
-        // Delay mid start by 1.5s so the fast loop gets priority
         setTimeout(scanMid, 1500);
         return () => { isMidRunningRef.current = false; };
     }, [scanUniverse.length > 0]);
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // SLOW LOOP: 1h/4h Swing Scanner (batch=50, 10s delay)
-    // Runs at a relaxed pace since higher TF candles change slowly
+    // SLOW LOOP: 1h/4h Swing Scanner
+    // HTF confirmation: 1h uses cached 4h bias; 4h is highest TF (no HTF)
     // ═══════════════════════════════════════════════════════════════════════════
     useEffect(() => {
         if (scanUniverse.length === 0 || isSwingRunningRef.current) return;
@@ -247,11 +252,9 @@ export const useScanner = (scanUniverse: string[]) => {
                 batch.push(...universe.slice(0, BATCH - batch.length));
             }
 
-            // Subscribe this batch to WebSockets for all timeframes
             subscribeKlines(batch, ['1m', '5m', '15m', '30m', '1h', '4h']);
 
             try {
-                // Process 1h and 4h in parallel
                 await Promise.all(['1h', '4h'].map(async (tf) => {
                     const batchData = await fetchKlinesBatch(batch, tf, 250);
 
@@ -260,7 +263,9 @@ export const useScanner = (scanUniverse: string[]) => {
                         if (candles.length < 210) return;
                         if (!shouldAnalyze(symbol, tf, candles)) return;
 
-                        const match = detectSwingSignal(symbol, candles, tf, 1);
+                        // HTF: 1h uses 4h bias; 4h has no higher TF available
+                        const htfBias = tf === '1h' ? getHTFBias(symbol, '4h') : undefined;
+                        const match = detectSwingSignal(symbol, candles, tf, 1, htfBias);
                         processSignal(match, symbol, tf);
                     });
                 }));
@@ -268,11 +273,9 @@ export const useScanner = (scanUniverse: string[]) => {
 
             swingIndexRef.current = (idx + batch.length) % universe.length;
 
-            // 10s delay — 1h/4h candles don't close often, no need to rush
             setTimeout(scanSwing, 10_000);
         };
 
-        // Delay swing start by 3s so the fast loop gets priority on initial API calls
         setTimeout(scanSwing, 3000);
         return () => { isSwingRunningRef.current = false; };
     }, [scanUniverse.length > 0]);

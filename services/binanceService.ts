@@ -493,3 +493,13 @@ export const subscribeToMiniTickers = (
 
   return { close: () => (ws as any).close() };
 };
+
+/**
+ * Get candles from cache without making API calls.
+ * Used for HTF trend bias checks.
+ */
+export function getCachedCandles(symbol: string, interval: string): Candle[] | null {
+  const key = `${symbol}-${interval}`;
+  const entry = candleCache.get(key);
+  return entry ? entry.candles : null;
+}
