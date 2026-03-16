@@ -254,6 +254,7 @@ function setCache(key: string, candles: Candle[]) {
 class CombinedStreamManager {
   private sockets: Map<number, WebSocket> = new Map();
   private streams = new Set<string>();
+  private subTimeout: any = null;
 
   addStreams(newStreams: string[]) {
     const toAdd = newStreams.filter(s => !this.streams.has(s));
@@ -261,56 +262,92 @@ class CombinedStreamManager {
 
     toAdd.forEach(s => this.streams.add(s));
 
-    // Recalculate chunks for all streams
-    const streamArray = Array.from(this.streams);
-    const requiredConnections = Math.ceil(streamArray.length / 200);
-
-    // For simplicity in this demo, if we exceed current connections, 
-    // we reconnect. In a production app, we'd only add the diff.
-    // However, to keep it 'incremental' and avoid gaps, we only 
-    // cycle if the stream count actually changed significantly.
-    if (this.sockets.size !== requiredConnections) {
-      this.reconnectAll();
-    }
+    // Debounce reconnection to collect all streams from a scan cycle 
+    // and avoid spamming connection attempts.
+    if (this.subTimeout) clearTimeout(this.subTimeout);
+    this.subTimeout = setTimeout(() => this.reconnectAll(), 2000);
   }
 
-  private reconnectAll() {
-    this.sockets.forEach(ws => ws.close());
-    this.sockets.clear();
+  private isReconnecting = false;
 
-    const streamArray = Array.from(this.streams);
-    for (let i = 0; i < streamArray.length; i += 200) {
-      const chunk = streamArray.slice(i, i + 200);
-      const url = `${WS_COMBINED}${chunk.join('/')}`;
-      const connId = i / 200;
+  private async reconnectAll() {
+    if (this.isReconnecting) return;
+    this.isReconnecting = true;
 
-      const ws = createAutoReconnectWs(url, (raw) => {
-        try {
-          const data = JSON.parse(raw);
-          const k = data.data.k;
-          const cacheKey = `${k.s}-${k.i}`;
+    try {
+      const streamArray = Array.from(this.streams);
+      const requiredConnections = Math.ceil(streamArray.length / 200);
 
-          const updated: Candle = {
-            time: k.t,
-            open: parseFloat(k.o),
-            high: parseFloat(k.h),
-            low: parseFloat(k.l),
-            close: parseFloat(k.c),
-            volume: parseFloat(k.v),
-          };
+      for (let i = 0; i < requiredConnections; i++) {
+        const start = i * 200;
+        const chunk = streamArray.slice(start, start + 200);
+        if (chunk.length === 0) continue;
 
-          const cached = candleCache.get(cacheKey);
-          if (cached) {
-            const arr = [...cached.candles];
-            const lastIdx = arr.length - 1;
-            if (arr[lastIdx]?.time === updated.time) arr[lastIdx] = updated;
-            else { arr.push(updated); if (arr.length > 200) arr.shift(); }
-            candleCache.set(cacheKey, { candles: arr, fetchedAt: Date.now() });
+        const url = `${WS_COMBINED}${chunk.join('/')}`;
+        const connId = i;
+
+        const existing = this.sockets.get(connId);
+
+        // Only reconnect if the URL has changed (new streams added to this chunk)
+        // or if the connection doesn't exist yet.
+        if (!existing || (existing as any)._url !== url) {
+          if (existing) {
+            // Gracefully close to avoid "closed before established" warning if possible
+            if (existing.readyState === WebSocket.CONNECTING) {
+              existing.onopen = () => existing.close();
+            } else {
+              existing.close();
+            }
           }
-        } catch (_) { }
-      }, () => { });
 
-      this.sockets.set(connId, ws);
+          // Add a small jittered delay between multiple connection attempts
+          if (i > 0) await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
+
+          const ws = createAutoReconnectWs(url, (raw) => {
+            try {
+              const data = JSON.parse(raw);
+              if (!data.data || !data.data.k) return;
+              const k = data.data.k;
+              const cacheKey = `${k.s}-${k.i}`;
+
+              const updated: Candle = {
+                time: k.t,
+                open: parseFloat(k.o),
+                high: parseFloat(k.h),
+                low: parseFloat(k.l),
+                close: parseFloat(k.c),
+                volume: parseFloat(k.v),
+              };
+
+              const cached = candleCache.get(cacheKey);
+              if (cached) {
+                const arr = [...cached.candles];
+                const lastIdx = arr.length - 1;
+                if (arr[lastIdx]?.time === updated.time) arr[lastIdx] = updated;
+                else {
+                  arr.push(updated);
+                  if (arr.length > 300) arr.shift(); // Keep sufficient history for indicators
+                }
+                candleCache.set(cacheKey, { candles: arr, fetchedAt: Date.now() });
+              }
+            } catch (_) { }
+          }, () => { });
+
+          // Store the URL on the proxy for comparison
+          (ws as any)._url = url;
+          this.sockets.set(connId, ws);
+        }
+      }
+
+      // Cleanup extra sockets if stream count decreased (unlikely in this app)
+      if (this.sockets.size > requiredConnections) {
+        for (let i = requiredConnections; i < this.sockets.size; i++) {
+          this.sockets.get(i)?.close();
+          this.sockets.delete(i);
+        }
+      }
+    } finally {
+      this.isReconnecting = false;
     }
   }
 }
@@ -352,14 +389,19 @@ function createAutoReconnectWs(
   connect();
 
   // Expose close() so callers can intentionally kill it
-  const proxy = new Proxy({} as WebSocket, {
+  return new Proxy({} as WebSocket, {
     get(_, prop) {
       if (prop === 'close') return () => { dead = true; ws.close(); };
+      if (prop === 'send') return (data: any) => ws.send(data);
+      if (prop === 'readyState') return ws.readyState;
+      if (prop === 'url') return ws.url;
       return (ws as any)[prop];
+    },
+    set(_, prop, value) {
+      (ws as any)[prop] = value;
+      return true;
     }
   });
-
-  return proxy;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
