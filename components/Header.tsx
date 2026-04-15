@@ -7,11 +7,9 @@ interface HeaderProps {
         queueSize: number;
         isLimited: boolean;
     };
-    alertEnabled: boolean;
-    onShowAlertSettings: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ apiStatus, alertEnabled, onShowAlertSettings }) => {
+const Header: React.FC<HeaderProps> = ({ apiStatus }) => {
     return (
         <header className="flex items-center justify-between px-8 py-6 border-b border-[#2b3139] bg-[#0b0e11]/95 backdrop-blur z-10 shrink-0">
             <div>
@@ -37,13 +35,6 @@ const Header: React.FC<HeaderProps> = ({ apiStatus, alertEnabled, onShowAlertSet
                         <span>{apiStatus.queueSize} Tasks</span>
                     </div>
                 </div>
-
-                <button
-                    onClick={onShowAlertSettings}
-                    className={`p-2 rounded-lg border transition-all ${alertEnabled ? 'border-indigo-500/50 text-indigo-400 bg-indigo-500/10' : 'border-[#2b3139] text-gray-500 hover:text-gray-300'}`}
-                >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                </button>
             </div>
         </header>
     );
