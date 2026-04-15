@@ -18,24 +18,27 @@ export interface SymbolInfo {
   lowPrice: string;
 }
 
+export interface ScreenerAnalysis {
+  symbol: string;
+  structure: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  pattern: 'HH_HL' | 'LH_LL' | 'CONSOLIDATION';
+  lastPivotHigh: number;
+  lastPivotLow: number;
+  explanation: string;
+  timestamp: number;
+}
+
 export interface StrategyMatch {
   symbol: string;
   price: number;
   timeframe: string;
   type: 'BULLISH' | 'BEARISH';
-  signal:
-  | 'SCALP_LONG'
-  | 'SCALP_SHORT'
-  | 'MID_LONG'
-  | 'MID_SHORT'
-  | 'SWING_LONG'
-  | 'SWING_SHORT';
+  signal: '2_CANDLE_IMPULSE' | '3_CANDLE_IMPULSE';
+  pullbackCount: number;
   timestamp: number;
-  entryPrice?: number;
-  stopLoss?: number;
-  takeProfit?: number;
-
-  status?: 'ACTIVE' | 'WIN' | 'LOSS';
-  exitPrice?: number;
-  exitTimestamp?: number;
+  macd: {
+    histogram: number;
+    value: number;
+  };
+  volumeSpike?: boolean;
 }

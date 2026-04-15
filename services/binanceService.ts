@@ -1,602 +1,215 @@
-/**
- * binanceService.ts
- *
- * Optimized Binance USD-M Futures API service:
- *  - Strict request queue (1 request at a time, adaptive interval)
- *  - Proactive weight tracking via response headers
- *  - Exponential back-off on 429 / 418 with jitter
- *  - Candle LRU cache so repeat scans cost 0 API weight
- *  - WebSocket kline streams for the 3 timeframes (no REST polling once subscribed)
- *  - Auto-reconnecting WebSocket manager
- *  - Unlimited USD-M symbol universe (all TRADING USDT pairs)
- */
 
 import { Candle, SymbolInfo } from '../types';
 
-// ─── Endpoints ────────────────────────────────────────────────────────────────
-const REST_BASE = 'https://fapi.binance.com/fapi/v1';
-const WS_BASE = 'wss://fstream.binance.com/ws';
-const WS_COMBINED = 'wss://fstream.binance.com/stream?streams=';
+const BASE_URL = 'https://fapi.binance.com/fapi/v1';
+const WS_BASE_URL = 'wss://fstream.binance.com/ws';
 
-// ─── Weight / back-off state ──────────────────────────────────────────────────
-// Binance limits: 2400 weight / min per IP.
-const WEIGHT_MAX = 2400;
-const WEIGHT_CRITICAL = 1750; // Stop low-priority tasks
-const WEIGHT_STOP = 2100;     // Stop all tasks
-const COALESCE_TTL = 1000;     // Deduplicate identical requests within 1s
+// --- Rate Limit & Queue Configuration ---
+const MAX_WEIGHT_PER_MINUTE = 2400;
+const SAFETY_THRESHOLD = 2000; // Start throttling at 2000
+const CRITICAL_THRESHOLD = 2200; // Hard stop at 2200
 
-let usedWeight1m = 0;
-let virtualWeight = 0; // Tracks "in-flight" weight
-let backoffUntil = 0;
-let banType: 'NONE' | 'RATE_LIMIT' | 'IP_BAN' = 'NONE';
-
-// Track in-flight requests for coalescing (deduplication)
-const inFlightRequests = new Map<string, Promise<any>>();
-
-export const getRateLimitStatus = () => {
-  const currentUsed = Math.max(usedWeight1m, virtualWeight);
-  return {
-    isLimited: Date.now() < backoffUntil,
-    resetTime: backoffUntil,
-    type: banType,
-    usedWeight: currentUsed,
-    weightPct: Math.round((currentUsed / WEIGHT_MAX) * 100),
-  };
-};
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
-
-function jitter(baseMs: number, spread = 0.3) {
-  return baseMs * (1 + (Math.random() * 2 - 1) * spread);
-}
-
-// ─── Request Queue ────────────────────────────────────────────────────────────
-// All REST calls are serialised through a single async queue so we never
-// accidentally fire > 1 request simultaneously and overshoot the weight limit.
-
-interface QueuedTask {
+interface RequestTask {
   endpoint: string;
   weight: number;
-  priority: number; // 0=Low, 1=Normal, 2=High
-  resolve: (v: any) => void;
-  reject: (e: any) => void;
+  resolve: (data: any) => void;
+  reject: (error: any) => void;
+  retries: number;
 }
 
-const queue: QueuedTask[] = [];
-let activeRequests = 0;
-let isProcessing = false;
+class RequestQueue {
+  private queue: RequestTask[] = [];
+  private processing = false;
+  private currentWeight = 0;
+  private lastWeightReset = Date.now();
+  private backoffUntil = 0;
+  private activeBan: 'NONE' | 'RATE_LIMIT' | 'IP_BAN' = 'NONE';
 
-async function processQueue() {
-  if (isProcessing) return;
-  isProcessing = true;
-
-  while (queue.length > 0) {
-    // 1. Check Global Backoff
-    const remaining = backoffUntil - Date.now();
-    if (remaining > 0) {
-      await sleep(remaining + 500);
-      continue;
-    }
-
-    // 2. Adaptive Concurrency Limit
-    // If weight is low, high concurrency. If weight is high, serial execution.
-    const currentWeight = Math.max(usedWeight1m, virtualWeight);
-    const maxConcurrent = currentWeight > 1500 ? 1 : 10;
-
-    if (activeRequests >= maxConcurrent) {
-      await sleep(50);
-      continue;
-    }
-
-    // 3. Weight Hard-Stop
-    if (currentWeight >= WEIGHT_STOP) {
-      await sleep(2000);
-      virtualWeight *= 0.9; // Artificial decay
-      continue;
-    }
-
-    // 4. Priority Filter
-    // Sort queue by priority: High (2) -> Normal (1) -> Low (0)
-    queue.sort((a, b) => b.priority - a.priority);
-
-    // If we are at CRITICAL weight, skip Low Priority tasks
-    if (currentWeight > WEIGHT_CRITICAL && queue[0].priority === 0) {
-      await sleep(5000); // Wait for weight reset
-      continue;
-    }
-
-    const task = queue.shift()!;
-    activeRequests++;
-    virtualWeight += task.weight;
-
-    (async () => {
-      try {
-        const result = await executeRequest(task.endpoint, task.weight);
-        task.resolve(result);
-      } catch (err) {
-        task.reject(err);
-      } finally {
-        activeRequests--;
-        // Keep virtual weight buffer for 3 seconds
-        setTimeout(() => { virtualWeight = Math.max(usedWeight1m, virtualWeight - task.weight); }, 3000);
-        processQueue();
-      }
-    })();
-
-    // Stagger starts to avoid burst spikes
-    const stagger = currentWeight > 1000 ? 400 : 50;
-    await sleep(stagger);
+  constructor() {
+    // Reset weight every minute
+    setInterval(() => {
+      this.currentWeight = 0;
+      this.lastWeightReset = Date.now();
+    }, 60000);
   }
 
-  isProcessing = false;
-}
-
-/**
- * Optimized Enqueue with Request Coalescing
- */
-function enqueue<T>(endpoint: string, weight: number, priority = 1): Promise<T> {
-  const cacheKey = `${endpoint}`;
-
-  // If a request for the same endpoint is already in flight, return the same promise.
-  // This prevents multiple components from hammering the API for the same data.
-  const existing = inFlightRequests.get(cacheKey);
-  if (existing) {
-    return existing;
-  }
-
-  const promise = new Promise<T>((resolve, reject) => {
-    queue.push({ endpoint, weight, priority, resolve: resolve as any, reject });
-    processQueue();
-  });
-
-  inFlightRequests.set(cacheKey, promise);
-
-  // Clear coalescing key after result or TTL to allow fresh updates later
-  promise.finally(() => {
-    setTimeout(() => inFlightRequests.delete(cacheKey), COALESCE_TTL);
-  });
-
-  return promise;
-}
-
-// ─── Execute a single REST request ────────────────────────────────────────────
-async function executeRequest(endpoint: string, weight: number): Promise<any> {
-  let attempt = 0;
-  while (true) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30_000); // 30s timeout
-      const res = await fetch(`${REST_BASE}${endpoint}`, { signal: controller.signal });
-      clearTimeout(timeoutId);
-
-      // Sync weight from header on every response
-      const wh = res.headers.get('x-mbx-used-weight-1m');
-      if (wh) {
-        usedWeight1m = parseInt(wh, 10);
-        // Sync virtual weight with real weight if header is fresh
-        virtualWeight = Math.max(virtualWeight, usedWeight1m);
-      }
-
-      if (res.status === 429) {
-        const retryAfter = parseInt(res.headers.get('Retry-After') ?? '60', 10);
-        const wait = retryAfter * 1_000;
-        backoffUntil = Date.now() + wait;
-        banType = 'RATE_LIMIT';
-        console.warn(`🔴 429 Rate-limit – back off ${retryAfter} s`);
-
-        // Wipe virtual weight to prevent double counting during backoff
-        virtualWeight = WEIGHT_MAX;
-
-        await sleep(wait + jitter(1_000));
-        attempt++;
-        continue; // retry same request
-      }
-
-      if (res.status === 418) {
-        const retryAfter = parseInt(res.headers.get('Retry-After') ?? '600', 10);
-        const wait = retryAfter * 1_000;
-        backoffUntil = Date.now() + wait;
-        banType = 'IP_BAN';
-        console.error(`🚨 418 IP-Ban – back off ${retryAfter} s`);
-        await sleep(wait + jitter(2_000));
-        attempt++;
-        continue;
-      }
-
-      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-
-      return await res.json();
-
-    } catch (err: any) {
-      if (err.message?.includes('fetch') || err.name === 'AbortError' || err.message?.includes('NetworkError')) {
-        // Reduced wait for high-frequency trading context
-        const wait = Math.min(1_000 * Math.pow(2, attempt), 10_000);
-        console.warn(`🌐 Network error/timeout (${err.message}) – retry in ${wait / 1000} s`);
-        await sleep(jitter(wait));
-        attempt++;
-        if (attempt > 3) throw err;
-        continue;
-      }
-      throw err;
-    }
-  }
-}
-
-/**
- * High-performance batch candle fetcher.
- * Uses the internal prioritized queue to handle rate limits and concurrency.
- */
-export const fetchKlinesBatch = async (
-  symbols: string[],
-  interval: string,
-  limit = 100,
-  priority = 1
-): Promise<Record<string, Candle[]>> => {
-  const results: Record<string, Candle[]> = {};
-  const toFetch: string[] = [];
-
-  for (const s of symbols) {
-    const cached = getCached(`${s}-${interval}`, interval);
-    if (cached) {
-      results[s] = cached.slice(-limit);
-    } else {
-      toFetch.push(s);
-    }
-  }
-
-  if (toFetch.length === 0) return results;
-
-  // Process batch while respecting our queue's internal throttling
-  await Promise.all(toFetch.map(async (symbol) => {
-    try {
-      results[symbol] = await fetchKlines(symbol, interval, limit, priority);
-    } catch (_) {
-      results[symbol] = [];
-    }
-  }));
-
-  return results;
-};
-
-// ─── Candle LRU Cache ─────────────────────────────────────────────────────────
-// Stores the last fetched candle array per (symbol, interval).
-// TTL is 1 candle-period so we never serve stale data but avoid hammering
-// the API for the same symbol/tf twice per scan cycle.
-
-interface CacheEntry {
-  candles: Candle[];
-  fetchedAt: number;
-}
-
-const candleCache = new Map<string, CacheEntry>();
-
-const CANDLE_TTL: Record<string, number> = {
-  '1m': 60_000 * 0.9,    // 54 seconds
-  '5m': 60_000 * 4.5,    // 4.5 minutes
-  '15m': 60_000 * 13,    // 13 minutes
-  '30m': 60_000 * 27,    // 27 minutes
-  '1h': 60_000 * 50,     // 50 minutes
-  '4h': 60_000 * 210,    // 3.5 hours
-};
-
-function getCached(key: string, interval: string): Candle[] | null {
-  const entry = candleCache.get(key);
-  if (!entry) return null;
-  const ttl = CANDLE_TTL[interval] ?? 55_000;
-  if (Date.now() - entry.fetchedAt < ttl) {
-    // Optimization: If we already tried to fetch the max available history, 
-    // don't try again until the TTL expires even if it's less than 'limit'.
-    return entry.candles;
-  }
-  candleCache.delete(key);
-  return null;
-}
-
-function setCache(key: string, candles: Candle[]) {
-  candleCache.set(key, { candles, fetchedAt: Date.now() });
-  // Keep map size bounded (max 5000 entries ≈ ~830 symbols × 6 tfs)
-  if (candleCache.size > 5_000) {
-    const firstKey = candleCache.keys().next().value;
-    if (firstKey) candleCache.delete(firstKey);
-  }
-}
-
-// ─── Combined WebSocket Manager ───────────────────────────────────────────────
-// Binance allows up to 200 streams per single connection. We use this to
-// track all top volatile coins across all 3 timeframes without hitting connection limits.
-// Partitioning into multiple connections if streams > 200.
-
-class CombinedStreamManager {
-  private sockets: Map<number, WebSocket> = new Map();
-  private streams = new Set<string>();
-  private subTimeout: any = null;
-
-  addStreams(newStreams: string[]) {
-    const toAdd = newStreams.filter(s => !this.streams.has(s));
-    if (toAdd.length === 0) return;
-
-    toAdd.forEach(s => this.streams.add(s));
-
-    // Debounce reconnection to collect all streams from a scan cycle 
-    // and avoid spamming connection attempts.
-    if (this.subTimeout) clearTimeout(this.subTimeout);
-    this.subTimeout = setTimeout(() => this.reconnectAll(), 2000);
-  }
-
-  private isReconnecting = false;
-
-  private async reconnectAll() {
-    if (this.isReconnecting) return;
-    this.isReconnecting = true;
-
-    try {
-      const streamArray = Array.from(this.streams);
-      const requiredConnections = Math.ceil(streamArray.length / 200);
-
-      for (let i = 0; i < requiredConnections; i++) {
-        const start = i * 200;
-        const chunk = streamArray.slice(start, start + 200);
-        if (chunk.length === 0) continue;
-
-        const url = `${WS_COMBINED}${chunk.join('/')}`;
-        const connId = i;
-
-        const existing = this.sockets.get(connId);
-
-        // Only reconnect if the URL has changed (new streams added to this chunk)
-        // or if the connection doesn't exist yet.
-        if (!existing || (existing as any)._url !== url) {
-          if (existing) {
-            // Gracefully close to avoid "closed before established" warning if possible
-            if (existing.readyState === WebSocket.CONNECTING) {
-              existing.onopen = () => existing.close();
-            } else {
-              existing.close();
-            }
-          }
-
-          // Add a small jittered delay between multiple connection attempts
-          if (i > 0) await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
-
-          const ws = createAutoReconnectWs(url, (raw) => {
-            try {
-              const data = JSON.parse(raw);
-              if (!data.data || !data.data.k) return;
-              const k = data.data.k;
-              const cacheKey = `${k.s}-${k.i}`;
-
-              const updated: Candle = {
-                time: k.t,
-                open: parseFloat(k.o),
-                high: parseFloat(k.h),
-                low: parseFloat(k.l),
-                close: parseFloat(k.c),
-                volume: parseFloat(k.v),
-              };
-
-              const cached = candleCache.get(cacheKey);
-              if (cached) {
-                const arr = [...cached.candles];
-                const lastIdx = arr.length - 1;
-                if (arr[lastIdx]?.time === updated.time) arr[lastIdx] = updated;
-                else {
-                  arr.push(updated);
-                  if (arr.length > 300) arr.shift(); // Keep sufficient history for indicators
-                }
-                candleCache.set(cacheKey, { candles: arr, fetchedAt: Date.now() });
-              }
-            } catch (_) { }
-          }, () => { });
-
-          // Store the URL on the proxy for comparison
-          (ws as any)._url = url;
-          this.sockets.set(connId, ws);
-        }
-      }
-
-      // Cleanup extra sockets if stream count decreased (unlikely in this app)
-      if (this.sockets.size > requiredConnections) {
-        for (let i = requiredConnections; i < this.sockets.size; i++) {
-          this.sockets.get(i)?.close();
-          this.sockets.delete(i);
-        }
-      }
-    } finally {
-      this.isReconnecting = false;
-    }
-  }
-}
-
-const streamManager = new CombinedStreamManager();
-
-export function subscribeKlines(symbols: string[], intervals: string[]) {
-  const streams: string[] = [];
-  symbols.forEach(s => {
-    intervals.forEach(tf => {
-      streams.push(`${s.toLowerCase()}@kline_${tf}`);
-    });
-  });
-  streamManager.addStreams(streams);
-}
-
-
-// ─── Auto-reconnect WebSocket factory ─────────────────────────────────────────
-function createAutoReconnectWs(
-  url: string,
-  onMessage: (data: string) => void,
-  onOpen?: () => void
-): WebSocket {
-  let ws: WebSocket;
-  let dead = false;
-
-  function connect() {
-    ws = new WebSocket(url);
-    ws.onopen = () => onOpen?.();
-    ws.onmessage = e => onMessage(e.data);
-    ws.onerror = () => { };
-    ws.onclose = () => {
-      if (!dead) {
-        setTimeout(connect, jitter(3_000, 0.5));
-      }
+  get status() {
+    return {
+      weight: this.currentWeight,
+      isLimited: Date.now() < this.backoffUntil,
+      resetIn: Math.max(0, this.backoffUntil - Date.now()),
+      banType: this.activeBan,
+      queueSize: this.queue.length
     };
   }
 
-  connect();
+  async add(endpoint: string, weight: number): Promise<any> {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ endpoint, weight, resolve, reject, retries: 0 });
+      this.process();
+    });
+  }
 
-  // Expose close() so callers can intentionally kill it
-  return new Proxy({} as WebSocket, {
-    get(_, prop) {
-      if (prop === 'close') return () => { dead = true; ws.close(); };
-      if (prop === 'send') return (data: any) => ws.send(data);
-      if (prop === 'readyState') return ws.readyState;
-      if (prop === 'url') return ws.url;
-      return (ws as any)[prop];
-    },
-    set(_, prop, value) {
-      (ws as any)[prop] = value;
-      return true;
+  private async process() {
+    if (this.processing || this.queue.length === 0) return;
+    this.processing = true;
+
+    while (this.queue.length > 0) {
+      if (Date.now() < this.backoffUntil) {
+        await new Promise(r => setTimeout(r, 1000));
+        continue;
+      }
+
+      // Check weight
+      if (this.currentWeight + this.queue[0].weight > CRITICAL_THRESHOLD) {
+        console.warn('Queue: Weight limit reached. Waiting...');
+        await new Promise(r => setTimeout(r, 2000));
+        continue;
+      }
+
+      const task = this.queue.shift()!;
+      try {
+        const data = await this.execute(task);
+        task.resolve(data);
+      } catch (error: any) {
+        if (task.retries < 3 && !error.message.includes('IP_BAN')) {
+          task.retries++;
+          console.warn(`Queue: Retrying ${task.endpoint} (${task.retries}/3)`);
+          this.queue.push(task); // Re-queue
+        } else {
+          task.reject(error);
+        }
+      }
+
+      // Small delay between requests to avoid burst
+      await new Promise(r => setTimeout(r, 50));
     }
-  });
+
+    this.processing = false;
+  }
+
+  private async execute(task: RequestTask): Promise<any> {
+    const response = await fetch(`${BASE_URL}${task.endpoint}`);
+
+    // Update weight from headers
+    const weightHeader = response.headers.get('x-mbx-used-weight-1m');
+    if (weightHeader) {
+      this.currentWeight = parseInt(weightHeader);
+    } else {
+      this.currentWeight += task.weight;
+    }
+
+    if (response.status === 429) {
+      const retryAfter = response.headers.get('Retry-After');
+      const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+      this.backoffUntil = Date.now() + waitTime;
+      this.activeBan = 'RATE_LIMIT';
+      throw new Error(`RATE_LIMIT: Paused for ${waitTime / 1000}s`);
+    }
+
+    if (response.status === 418) {
+      this.backoffUntil = Date.now() + 600000; // 10 mins
+      this.activeBan = 'IP_BAN';
+      throw new Error('IP_BAN: Paused for 10 minutes');
+    }
+
+    if (!response.ok) {
+      throw new Error(`Binance Error: ${response.status} ${response.statusText}`);
+    }
+
+    return await response.json();
+  }
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+const queue = new RequestQueue();
 
-/**
- * Fetch ALL USD-M futures tickers + exchange info in two lightweight requests.
- * Weight: /ticker/24hr = 40, /exchangeInfo = 1 → total 41
- */
-let cachedExchangeInfo: any = null;
-let lastExchangeInfoFetch = 0;
+// --- Caching ---
+const klineCache: Map<string, { data: Candle[], timestamp: number }> = new Map();
+const CACHE_TTL = 30000; // 30 seconds
+
+// --- API Methods ---
+
+export const getRateLimitStatus = () => queue.status;
 
 export const fetchTickers = async (): Promise<SymbolInfo[]> => {
   try {
-    const shouldFetchEI = !cachedExchangeInfo || (Date.now() - lastExchangeInfoFetch > 3600_000);
+    const tickers = await queue.add('/ticker/24hr', 40);
+    const exchangeInfo = await queue.add('/exchangeInfo', 1);
 
-    const [tickers, exchangeInfo] = await Promise.all([
-      enqueue<any[]>('/ticker/24hr', 40),
-      shouldFetchEI ? enqueue<any>('/exchangeInfo', 1) : Promise.resolve(cachedExchangeInfo),
-    ]);
-
-    if (shouldFetchEI) {
-      cachedExchangeInfo = exchangeInfo;
-      lastExchangeInfoFetch = Date.now();
-    }
-
-    const activeSet = new Set<string>(
+    const activeSymbolsMap = new Map<string, any>(
       exchangeInfo.symbols
         .filter((s: any) => s.status === 'TRADING' && s.quoteAsset === 'USDT')
-        .map((s: any) => s.symbol as string)
+        .map((s: any) => [s.symbol, s])
     );
 
-
-
-    // 1. Map for internal logic using numeric values for sorting
-    const enriched = tickers
-      .filter((t: any) => activeSet.has(t.symbol))
+    return tickers
+      .filter((t: any) => activeSymbolsMap.has(t.symbol))
       .map((t: any) => ({
-        ticker: {
-          symbol: t.symbol,
-          price: t.lastPrice,
-          priceChangePercent: t.priceChangePercent,
-          volume: t.volume,
-          quoteVolume: t.quoteVolume,
-          highPrice: t.highPrice,
-          lowPrice: t.lowPrice,
-        } as SymbolInfo,
-        numChange: parseFloat(t.priceChangePercent),
-        numVolume: parseFloat(t.quoteVolume)
-      }));
-
-    // 2. Include ALL liquid coins (>$1M daily volume) sorted by volume
-    //    This ensures we scan the full universe for high-probability setups
-    //    rather than only coins that are already pumping.
-    const liquidCoins = enriched
-      .filter((a) => a.numVolume > 1_000_000) // $1M min to filter dead/illiquid pairs
-      .sort((a, b) => b.numVolume - a.numVolume); // Highest volume first = most liquid = tightest spreads
-
-    // 3. Return ALL liquid coins
-    return liquidCoins.map(e => e.ticker);
+        ...t,
+        onboardDate: activeSymbolsMap.get(t.symbol)?.onboardDate
+      }))
+      .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
   } catch (error) {
     console.error('fetchTickers error:', error);
     return [];
   }
 };
 
-/**
- * Fetch klines with cache-first logic.
- * Weight: 1 per call. With LRU cache this is often 0 API cost.
- */
-export const fetchKlines = async (
-  symbol: string,
-  interval: string,
-  limit = 90,
-  priority = 1
-): Promise<Candle[]> => {
-  const cacheKey = `${symbol}-${interval}`;
-  const cached = getCached(cacheKey, interval);
+export const fetchKlines = async (symbol: string, interval: string, limit: number = 100): Promise<Candle[]> => {
+  const cacheKey = `${symbol}_${interval}_${limit}`;
+  const cached = klineCache.get(cacheKey);
 
-  if (cached) {
-    return cached.slice(-limit);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
   }
 
   try {
-    const data = await enqueue<any[]>(
-      `/klines?symbol=${symbol}&interval=${interval}&limit=${Math.max(limit, 100)}`,
-      1,
-      priority
-    );
-
-    if (!Array.isArray(data)) {
-      setCache(cacheKey, []);
-      return [];
-    }
-
-    const candles: Candle[] = data.map((d: any[]) => ({
+    const data = await queue.add(`/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`, 1);
+    const candles = data.map((d: any[]) => ({
       time: d[0],
       open: parseFloat(d[1]),
       high: parseFloat(d[2]),
       low: parseFloat(d[3]),
       close: parseFloat(d[4]),
-      volume: parseFloat(d[5]),
+      volume: parseFloat(d[5])
     }));
 
-    setCache(cacheKey, candles);
-    return candles.slice(-limit);
-  } catch (err) {
-    // Cache empty array to avoid repeatedly hammering the API for broken or delisted coins
-    console.warn(`Error fetching klines for ${symbol} ${interval}:`, err);
-    setCache(cacheKey, []);
-    return [];
+    klineCache.set(cacheKey, { data: candles, timestamp: Date.now() });
+    return candles;
+  } catch (error) {
+    if (cached) return cached.data; // Return stale data on error
+    throw error;
   }
 };
 
-/**
- * Subscribe to mini-ticker stream (lower bandwidth than full ticker).
- * Used for fast price updates without heavy payload.
- */
-export const subscribeToMiniTickers = (
-  onMessage: (data: any[]) => void
-): { close: () => void } => {
-  const ws = createAutoReconnectWs(
-    `${WS_BASE}/!miniTicker@arr`,
-    (raw) => {
-      try {
-        const data = JSON.parse(raw);
-        if (Array.isArray(data)) onMessage(data);
-      } catch (_) { }
-    }
-  );
+export const subscribeToAllTickers = (onMessage: (data: any[]) => void): any => {
+  // Use global WebSocket (Browser or Node 22+) or fallback to 'ws' if defined
+  const WS = typeof WebSocket !== 'undefined' ? WebSocket : (global as any).WebSocket;
 
-  return { close: () => (ws as any).close() };
+  if (!WS) {
+    throw new Error('WebSocket is not defined. Please run with Node 22+ or install ws and polyfill global.WebSocket');
+  }
+
+  const ws = new WS(`${WS_BASE_URL}/!ticker@arr`);
+  ws.onmessage = (event) => {
+    try {
+      onMessage(JSON.parse(event.data));
+    } catch (e) {
+      console.error('WS Error', e);
+    }
+  };
+  ws.onerror = () => console.warn('Binance WS Error (Auto-reconnecting...)');
+  return ws;
 };
 
-/**
- * Get candles from cache without making API calls.
- * Used for HTF trend bias checks.
- */
-export function getCachedCandles(symbol: string, interval: string): Candle[] | null {
-  const key = `${symbol}-${interval}`;
-  const entry = candleCache.get(key);
-  return entry ? entry.candles : null;
-}
+export const fetchFundingRate = async (symbol: string): Promise<{ rate: string; nextFunding: number }> => {
+  try {
+    const data = await queue.add(`/premiumIndex?symbol=${symbol}`, 1);
+    return {
+      rate: (parseFloat(data.lastFundingRate) * 100).toFixed(4) + '%',
+      nextFunding: data.nextFundingTime
+    };
+  } catch {
+    return { rate: '0.0000%', nextFunding: Date.now() };
+  }
+};

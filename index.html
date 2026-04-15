@@ -1,42 +1,88 @@
+
 <!DOCTYPE html>
 <html lang="en">
-
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SENTINEL | Alpha Terminal</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Inter', 'system-ui', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
-          },
-          colors: {
-            binance: {
-              black: '#0b0e11',
-              dark: '#161a1e',
-              border: '#2b3139',
-              yellow: '#fcd535',
-              gray: '#848e9c'
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SupplyDemand AI Terminal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              binance: {
+                black: '#0b0e11',
+                dark: '#161a1e',
+                border: '#1e2329',
+                yellow: '#fcd535',
+                gray: '#848e9c'
+              }
             }
           }
         }
       }
-    }
-  </script>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
-  </style>
-  <link rel="stylesheet" href="/index.css">
-</head>
+    </script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+      
+      body {
+        font-family: 'Inter', sans-serif;
+        margin: 0;
+        overflow-x: hidden;
+        transition: background-color 0.3s ease, color 0.3s ease;
+      }
+      
+      .font-mono {
+        font-family: 'JetBrains Mono', monospace;
+      }
 
-<body class="bg-[#0b0e11]">
-  <div id="root"></div>
+      /* Custom Scrollbars */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .dark ::-webkit-scrollbar-track {
+        background: #1e2329;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #cfd3d8;
+        border-radius: 10px;
+      }
+      .dark ::-webkit-scrollbar-thumb {
+        background: #474d57;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #b0b5bb;
+      }
+      .dark ::-webkit-scrollbar-thumb:hover {
+        background: #5e6673;
+      }
+
+      /* Theme Transitions */
+      * {
+        transition: background-color 0.2s ease, border-color 0.2s ease, color 0.1s ease;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.39.0",
+    "d3": "https://esm.sh/d3@^7.9.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="dark bg-white dark:bg-binance-black text-binance-black dark:text-[#eaecef]">
+    <div id="root"></div>
   <script type="module" src="/index.tsx"></script>
 </body>
-
 </html>
