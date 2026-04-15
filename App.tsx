@@ -58,11 +58,12 @@ const App: React.FC = () => {
     return () => ws.close();
   }, [tickers.length > 0]);
 
-  // Sidebar List (Volatility Zone)
+  // Sidebar List (Top 50 Gainers)
   const sidebarAssets = useMemo(() => {
     return tickers
-      .filter(t => Math.abs(parseFloat(t.priceChangePercent)) >= 10.0)
-      .sort((a, b) => Math.abs(parseFloat(b.priceChangePercent)) - Math.abs(parseFloat(a.priceChangePercent)));
+      .filter(t => parseFloat(t.priceChangePercent) > 0)
+      .sort((a, b) => parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent))
+      .slice(0, 50);
   }, [tickers]);
 
   // --- Background Scanner Logic (Optimized Parallel Scanning) ---
@@ -72,9 +73,9 @@ const App: React.FC = () => {
     isScanningRef.current = true;
 
     const scanUniverse = [...tickers]
-      .filter(t => !BLACKLIST.includes(t.symbol))
-      .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-      .slice(0, 150) // Scan top 150
+      .filter(t => !BLACKLIST.includes(t.symbol) && parseFloat(t.priceChangePercent) > 0)
+      .sort((a, b) => parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent))
+      .slice(0, 50) // Scan top 50 gainers
       .map(t => t.symbol);
 
     const scanNext = async () => {
